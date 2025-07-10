@@ -1,0 +1,547 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🦉 Uhu-Ruf-Detektor</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
+        .custom-file-input::-webkit-file-upload-button {
+            visibility: hidden;
+        }
+        .custom-file-input::before {
+            content: 'Audiodateien auswählen';
+            display: inline-block;
+            background: #4f46e5;
+            color: white;
+            border-radius: 0.375rem;
+            padding: 0.5rem 1rem;
+            outline: none;
+            white-space: nowrap;
+            -webkit-user-select: none;
+            cursor: pointer;
+            font-weight: 500;
+            margin-right: 1rem;
+        }
+        .custom-file-input:hover::before {
+            background: #4338ca;
+        }
+        .custom-file-input:active::before {
+            background: #3730a3;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #4f46e5;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-800">
+
+    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
+        <header class="text-center mb-8">
+            <h1 class="text-4xl md:text-5xl font-bold text-gray-900">🦉 Uhu-Ruf-Detektor</h1>
+            <p class="mt-4 text-lg text-gray-600">Laden Sie eine oder mehrere Audiodateien hoch, um sie automatisch nach Uhu-Rufen zu durchsuchen.</p>
+        </header>
+
+        <main class="bg-white p-6 md:p-8 rounded-2xl shadow-lg">
+            
+            <!-- Upload Section -->
+            <div class="mb-8 text-center">
+                <label for="file-uploader" class="block text-lg font-medium text-gray-700 mb-2">Audiodateien hierher ziehen</label>
+                <div class="mt-2 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
+                    <div class="space-y-1 text-center">
+                        <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
+                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                        </svg>
+                        <div class="flex text-sm text-gray-600">
+                            <label for="file-uploader" class="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
+                                <span>Dateien hochladen</span>
+                                <input id="file-uploader" name="file-uploader" type="file" class="sr-only" multiple accept="audio/wav, audio/mp3, audio/flac, audio/m4a, audio/ogg, audio/opus">
+                            </label>
+                            <p class="pl-1">oder per Drag & Drop</p>
+                        </div>
+                        <p class="text-xs text-gray-500">WAV, MP3, FLAC, M4A, OGG, OPUS</p>
+                    </div>
+                </div>
+                <div id="file-list" class="mt-4 text-left"></div>
+            </div>
+
+            <!-- Parameters Section -->
+            <div id="parameters-section" class="hidden">
+                <h2 class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">1. Parameter einstellen</h2>
+                
+                <div class="mb-6">
+                    <label for="threshold-slider" class="block font-medium text-gray-700">Sicherheitsschwelle: <span id="threshold-value" class="font-bold text-indigo-600">0.95</span></label>
+                    <input id="threshold-slider" type="range" min="0.5" max="1.0" value="0.95" step="0.01" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                    <p class="text-sm text-gray-500 mt-1">Wie sicher soll die KI sein, dass es ein Uhu-Ruf ist? (1.0 = 100% sicher)</p>
+                </div>
+
+                <div class="bg-gray-50 p-4 rounded-lg">
+                    <details>
+                        <summary class="font-medium cursor-pointer text-gray-700">Erweiterte Einstellungen</summary>
+                        <div class="mt-4">
+                            <div class="flex items-center mb-4">
+                                <input id="merge-checkbox" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
+                                <label for="merge-checkbox" class="ml-2 block text-sm text-gray-900">Überlappende Erkennungen zusammenführen</label>
+                            </div>
+                            <div>
+                                <label for="overlap-slider" class="block font-medium text-gray-700">Analyse-Überlappung: <span id="overlap-value" class="font-bold text-indigo-600">50%</span></label>
+                                <input id="overlap-slider" type="range" min="0" max="95" value="50" step="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
+                                <p class="text-sm text-gray-500 mt-1">Eine höhere Überlappung findet kurze Rufe zuverlässiger, die Analyse dauert aber länger.</p>
+                            </div>
+                        </div>
+                    </details>
+                </div>
+                
+                <div class="mt-8 text-center">
+                    <button id="start-analysis-btn" class="bg-indigo-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-indigo-700 transition-colors duration-300 text-lg shadow-md">
+                        🚀 Analyse starten
+                    </button>
+                </div>
+            </div>
+
+            <!-- Analysis Progress Section -->
+            <div id="analysis-progress" class="hidden text-center my-8">
+                 <div class="loader mx-auto"></div>
+                 <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
+                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                    <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Results Section -->
+            <div id="results-section" class="hidden mt-10">
+                <h2 id="results-title" class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">2. Ergebnisse</h2>
+                <div id="results-summary"></div>
+                <div id="results-grid" class="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
+            </div>
+
+        </main>
+    </div>
+
+    <script type="module">
+        // --- Konfiguration ---
+        const MODEL_PATH = './model/model.json'; // WICHTIG: Pfad zur konvertierten model.json
+        const SAMPLE_RATE = 16000;
+        const WINDOW_SEC = 3.0;
+        const N_MELS = 64;
+        const F_LOW = 200;
+        const F_HIGH = 2000;
+        const N_FFT = 2048;
+        const HOP_LENGTH = 512;
+        const MAX_CLIPS_TO_SHOW = 20;
+        const WINDOW_SAMPLES = WINDOW_SEC * SAMPLE_RATE;
+
+        // --- UI-Elemente ---
+        const fileUploader = document.getElementById('file-uploader');
+        const fileListDiv = document.getElementById('file-list');
+        const paramsSection = document.getElementById('parameters-section');
+        const thresholdSlider = document.getElementById('threshold-slider');
+        const thresholdValue = document.getElementById('threshold-value');
+        const overlapSlider = document.getElementById('overlap-slider');
+        const overlapValue = document.getElementById('overlap-value');
+        const mergeCheckbox = document.getElementById('merge-checkbox');
+        const startBtn = document.getElementById('start-analysis-btn');
+        const analysisProgress = document.getElementById('analysis-progress');
+        const progressText = document.getElementById('progress-text');
+        const progressBar = document.getElementById('progress-bar');
+        const resultsSection = document.getElementById('results-section');
+        const resultsTitle = document.getElementById('results-title');
+        const resultsSummary = document.getElementById('results-summary');
+        const resultsGrid = document.getElementById('results-grid');
+
+        let uploadedFiles = [];
+        let model = null;
+
+        // --- Event Listeners ---
+        fileUploader.addEventListener('change', (e) => {
+            handleFiles(e.target.files);
+        });
+
+        // Drag and Drop
+        const dropZone = fileUploader.closest('.border-dashed');
+        dropZone.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.add('border-indigo-500', 'bg-indigo-50');
+        });
+        dropZone.addEventListener('dragleave', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+        });
+        dropZone.addEventListener('drop', (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
+            handleFiles(e.dataTransfer.files);
+        });
+
+        thresholdSlider.addEventListener('input', (e) => {
+            thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
+        });
+        overlapSlider.addEventListener('input', (e) => {
+            overlapValue.textContent = `${e.target.value}%`;
+        });
+        startBtn.addEventListener('click', runAnalysis);
+
+        function handleFiles(files) {
+            uploadedFiles = Array.from(files);
+            if (uploadedFiles.length > 0) {
+                fileListDiv.innerHTML = `<h3 class="font-medium text-gray-700">Ausgewählte Dateien:</h3><ul class="list-disc list-inside text-sm text-gray-600">${uploadedFiles.map(f => `<li>${f.name}</li>`).join('')}</ul>`;
+                paramsSection.classList.remove('hidden');
+            } else {
+                fileListDiv.innerHTML = '';
+                paramsSection.classList.add('hidden');
+            }
+        }
+
+        // --- DSP & Audio-Verarbeitung ---
+        
+        function createMelFilterbank(fftSize, n_mels, sr, f_low, f_high) {
+            const mel_low = 2595.0 * Math.log10(1.0 + f_low / 700.0);
+            const mel_high = 2595.0 * Math.log10(1.0 + f_high / 700.0);
+            const mel_points = tf.linspace(mel_low, mel_high, n_mels + 2).arraySync();
+            const hz_points = mel_points.map(m => 700.0 * (Math.pow(10, m / 2595.0) - 1.0));
+            const bin_points = hz_points.map(f => Math.floor((fftSize + 1) * f / sr));
+
+            const filters = [];
+            for (let i = 0; i < n_mels; i++) {
+                const filter = new Array(fftSize / 2 + 1).fill(0);
+                const start = bin_points[i];
+                const center = bin_points[i+1];
+                const end = bin_points[i+2];
+
+                for (let j = start; j < center; j++) {
+                    filter[j] = (j - start) / (center - start);
+                }
+                for (let j = center; j < end; j++) {
+                    filter[j] = (end - j) / (end - center);
+                }
+                filters.push(filter);
+            }
+            return tf.tensor2d(filters, [n_mels, fftSize / 2 + 1]);
+        }
+        
+        const melFilterbank = createMelFilterbank(N_FFT, N_MELS, SAMPLE_RATE, F_LOW, F_HIGH);
+
+        function logmelspec(y_clip) {
+            return tf.tidy(() => {
+                // 1. STFT berechnen
+                const tensor_clip = tf.tensor1d(y_clip);
+                const paddedClip = tensor_clip.pad([[N_FFT / 2, N_FFT / 2]]);
+                const stft = tf.signal.stft(paddedClip, N_FFT, HOP_LENGTH, N_FFT, tf.signal.hannWindow);
+                const power_spec = tf.square(tf.abs(stft));
+                
+                // 2. Mel-Spektrogramm
+                const mel_spec = tf.dot(power_spec, melFilterbank.transpose());
+
+                // 3. In Dezibel umwandeln (power_to_db)
+                // KORRIGIERT: tf.log10 existiert nicht. Formel zur Basen-Konvertierung verwenden.
+                const log_spec = tf.log(tf.maximum(1e-10, mel_spec)).div(tf.log(10));
+                const max_val = log_spec.max();
+                const db_spec = tf.mul(tf.sub(log_spec, max_val), 10.0);
+
+                // 4. Normalisieren (wie im Python-Skript)
+                const mean = db_spec.mean();
+                const std = tf.sqrt(db_spec.sub(mean).square().mean());
+                const normalized = db_spec.sub(mean).div(std.add(1e-6));
+                
+                // Transponieren, um die vom Modell erwartete Form [n_mels, time_steps] -> [64, 94] zu erhalten
+                const transposed = normalized.transpose();
+                
+                tensor_clip.dispose();
+                
+                return transposed;
+            });
+        }
+
+        async function decodeAndStandardizeAudio(file) {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: SAMPLE_RATE });
+            const arrayBuffer = await file.arrayBuffer();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            // Sicherstellen, dass die Ausgabe Mono ist
+            if (audioBuffer.numberOfChannels > 1) {
+                const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * SAMPLE_RATE, SAMPLE_RATE);
+                const source = offlineCtx.createBufferSource();
+                source.buffer = audioBuffer;
+                source.connect(offlineCtx.destination);
+                source.start(0);
+                const renderedBuffer = await offlineCtx.startRendering();
+                return renderedBuffer.getChannelData(0);
+            }
+            
+            return audioBuffer.getChannelData(0); // Bereits Mono
+        }
+        
+        function mergeEvents(candidates) {
+            if (!candidates || candidates.length === 0) return [];
+            candidates.sort((a, b) => a.start - b.start);
+            const merged = [Object.assign({}, candidates[0])];
+            for (let i = 1; i < candidates.length; i++) {
+                const last = merged[merged.length - 1];
+                const current = candidates[i];
+                if (current.start <= last.end) {
+                    last.end = Math.max(last.end, current.end);
+                    last.prob = Math.max(last.prob, current.prob);
+                } else {
+                    merged.push(Object.assign({}, current));
+                }
+            }
+            return merged;
+        }
+
+        async function runAnalysis() {
+            if (uploadedFiles.length === 0) {
+                alert("Bitte wählen Sie zuerst Audiodateien aus.");
+                return;
+            }
+
+            startBtn.disabled = true;
+            startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+            analysisProgress.classList.remove('hidden');
+            resultsSection.classList.add('hidden');
+            resultsGrid.innerHTML = '';
+            resultsSummary.innerHTML = '';
+
+            try {
+                if (!model) {
+                    progressText.textContent = 'Lade Erkennungsmodell...';
+                    try {
+                        model = await tf.loadLayersModel(MODEL_PATH);
+                        const dummyInput = tf.zeros([1, N_MELS, 94, 1]);
+                        model.predict(dummyInput).dispose();
+                        dummyInput.dispose();
+                    } catch (error) {
+                         progressText.textContent = `Fehler beim Laden des Modells: ${MODEL_PATH} nicht gefunden. Stellen Sie sicher, dass die Datei existiert und der Pfad korrekt ist.`;
+                         console.error("Modell-Ladefehler:", error);
+                         return;
+                    }
+                }
+
+                const threshold = parseFloat(thresholdSlider.value);
+                const overlapPercent = parseInt(overlapSlider.value);
+                const shouldMerge = mergeCheckbox.checked;
+                const strideSec = WINDOW_SEC * (1 - overlapPercent / 100.0);
+                const strideSamples = Math.round(strideSec * SAMPLE_RATE);
+
+                let allEvents = [];
+
+                for (let i = 0; i < uploadedFiles.length; i++) {
+                    const file = uploadedFiles[i];
+                    progressText.textContent = `Analysiere: ${file.name} (${i+1}/${uploadedFiles.length})`;
+                    progressBar.style.width = `${((i + 0.5) / uploadedFiles.length) * 100}%`;
+
+                    try {
+                        const y = await decodeAndStandardizeAudio(file);
+                        const specs = [];
+                        const starts = [];
+                        
+                        for (let start = 0; start < y.length - strideSamples; start += strideSamples) {
+                            const end = start + WINDOW_SAMPLES;
+                            if (end > y.length) break;
+                            
+                            let clip = y.slice(start, end);
+                            if (clip.length < WINDOW_SAMPLES) {
+                                const paddedClip = new Float32Array(WINDOW_SAMPLES);
+                                paddedClip.set(clip);
+                                clip = paddedClip;
+                            }
+                            
+                            const spec = logmelspec(clip);
+                            specs.push(spec);
+                            starts.push(start);
+                        }
+
+                        if (specs.length > 0) {
+                            const X = tf.stack(specs).expandDims(-1);
+                            const probs = await model.predict(X).data();
+                            X.dispose();
+                            specs.forEach(s => s.dispose());
+
+                            let candidates = [];
+                            for (let j = 0; j < probs.length; j++) {
+                                if (probs[j] >= threshold) {
+                                    candidates.push({
+                                        start: starts[j],
+                                        end: starts[j] + WINDOW_SAMPLES,
+                                        prob: probs[j],
+                                        file: file.name,
+                                        audioClip: y.slice(starts[j], starts[j] + WINDOW_SAMPLES)
+                                    });
+                                }
+                            }
+                            
+                            const fileEvents = shouldMerge ? mergeEvents(candidates) : candidates;
+                            allEvents.push(...fileEvents);
+                        }
+                    } catch (e) {
+                        console.error(`Fehler bei der Verarbeitung von ${file.name}:`, e);
+                        alert(`Konnte Datei '${file.name}' nicht verarbeiten: ${e.message}`);
+                    }
+                }
+                
+                progressBar.style.width = '100%';
+                progressText.textContent = 'Analyse abgeschlossen!';
+                displayResults(allEvents);
+
+            } catch (error) {
+                console.error("Ein Fehler ist aufgetreten:", error);
+                progressText.textContent = `Ein Fehler ist aufgetreten: ${error.message}`;
+            } finally {
+                startBtn.disabled = false;
+                startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+                setTimeout(() => {
+                    analysisProgress.classList.add('hidden');
+                    progressBar.style.width = '0%';
+                }, 2000);
+            }
+        }
+
+        // --- Ergebnisdarstellung ---
+
+        function createWavBlob(samples, sampleRate) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+
+            writeString(view, 0, 'RIFF');
+            view.setUint32(4, 36 + samples.length * 2, true);
+            writeString(view, 8, 'WAVE');
+            writeString(view, 12, 'fmt ');
+            view.setUint32(16, 16, true);
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
+            view.setUint32(24, sampleRate, true);
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
+            writeString(view, 36, 'data');
+            view.setUint32(40, samples.length * 2, true);
+
+            let offset = 44;
+            for (let i = 0; i < samples.length; i++, offset += 2) {
+                const s = Math.max(-1, Math.min(1, samples[i]));
+                view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            }
+
+            return new Blob([view], { type: 'audio/wav' });
+        }
+
+        function writeString(view, offset, string) {
+            for (let i = 0; i < string.length; i++) {
+                view.setUint8(offset + i, string.charCodeAt(i));
+            }
+        }
+
+        function displayResults(events) {
+            resultsSection.classList.remove('hidden');
+            resultsTitle.textContent = `2. Ergebnisse: ${events.length} Uhu-Rufe gefunden`;
+
+            if (events.length === 0) {
+                resultsSummary.innerHTML = `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-md" role="alert"><p>Es wurden keine Ereignisse über dem eingestellten Schwellenwert gefunden.</p></div>`;
+                return;
+            }
+
+            events.sort((a, b) => b.prob - a.prob);
+
+            const csvContent = "data:text/csv;charset=utf-8," 
+                + "file,start_s,end_s,probability\n"
+                + events.map(e => `${e.file},${(e.start / SAMPLE_RATE).toFixed(2)},${(e.end / SAMPLE_RATE).toFixed(2)},${e.prob.toFixed(3)}`).join("\n");
+            
+            const encodedUri = encodeURI(csvContent);
+            resultsSummary.innerHTML = `<a href="${encodedUri}" download="uhu_events.csv" class="inline-block bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">📄 Alle ${events.length} Erkennungen als CSV herunterladen</a>`;
+
+            const clipsToShow = events.slice(0, MAX_CLIPS_TO_SHOW);
+            resultsGrid.innerHTML = `<h3 class="col-span-full text-xl font-bold text-gray-800 mt-6 mb-2">Erkannte Clips (Top ${clipsToShow.length})</h3>`;
+            
+            clipsToShow.forEach(event => {
+                const card = document.createElement('div');
+                card.className = 'bg-gray-50 p-4 rounded-lg shadow';
+                
+                const specCanvas = document.createElement('canvas');
+                specCanvas.width = 200;
+                specCanvas.height = 128;
+                
+                const audio = new Audio();
+                const blob = createWavBlob(event.audioClip, SAMPLE_RATE);
+                audio.src = URL.createObjectURL(blob);
+                audio.controls = true;
+                audio.className = 'w-full mt-2';
+
+                card.innerHTML = `
+                    <p class="text-sm font-medium truncate" title="${event.file}">${event.file}</p>
+                    <p class="text-xs text-indigo-600 font-bold">Wahrscheinlichkeit: ${(event.prob * 100).toFixed(1)}%</p>
+                `;
+                card.appendChild(specCanvas);
+                card.appendChild(audio);
+                
+                resultsGrid.appendChild(card);
+                
+                const specData = logmelspec(event.audioClip);
+                drawSpectrogram(specData, specCanvas);
+                specData.dispose();
+            });
+        }
+
+        function getColorForValue(value) {
+            const c = [
+                [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142],
+                [31, 158, 137], [53, 183, 121], [109, 205, 89], [180, 222, 44], [253, 231, 37]
+            ];
+            const i = Math.min(Math.max(Math.floor(value * (c.length - 1)), 0), c.length - 2);
+            const t = value * (c.length - 1) - i;
+            const r = Math.floor(c[i][0] + t * (c[i+1][0] - c[i][0]));
+            const g = Math.floor(c[i][1] + t * (c[i+1][1] - c[i][1]));
+            const b = Math.floor(c[i][2] + t * (c[i+1][2] - c[i][2]));
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function drawSpectrogram(spec, canvas) {
+            const ctx = canvas.getContext('2d');
+            const [height, width] = spec.shape;
+            const canvasWidth = canvas.width;
+            const canvasHeight = canvas.height;
+            
+            const specArray = spec.arraySync();
+            
+            let minVal = Infinity, maxVal = -Infinity;
+            for(let i=0; i<height; i++) {
+                for(let j=0; j<width; j++) {
+                    if(specArray[i][j] < minVal) minVal = specArray[i][j];
+                    if(specArray[i][j] > maxVal) maxVal = specArray[i][j];
+                }
+            }
+            const range = maxVal - minVal;
+
+            const colWidth = canvasWidth / width;
+            const rowHeight = canvasHeight / height;
+
+            ctx.clearRect(0, 0, canvasWidth, canvasHeight);
+
+            for (let x = 0; x < width; x++) {
+                for (let y = 0; y < height; y++) {
+                    const value = specArray[y][x];
+                    const normalized = (value - minVal) / range;
+                    ctx.fillStyle = getColorForValue(normalized);
+                    ctx.fillRect(x * colWidth, canvasHeight - (y + 1) * rowHeight, colWidth, rowHeight);
+                }
+            }
+        }
+
+    </script>
+</body>
+</html>
