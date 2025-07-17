@@ -58,7 +58,6 @@
 
         <main class="bg-white p-6 md:p-8 rounded-2xl shadow-lg">
             
-            <!-- Upload Section -->
             <div class="mb-8 text-center">
                 <label for="file-uploader" class="block text-lg font-medium text-gray-700 mb-2">Audiodateien hierher ziehen</label>
                 <div class="mt-2 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
@@ -79,16 +78,9 @@
                 <div id="file-list" class="mt-4 text-left"></div>
             </div>
 
-            <!-- Parameters Section -->
             <div id="parameters-section" class="hidden">
                 <h2 class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">1. Parameter einstellen</h2>
                 
-                <div class="mb-6">
-                    <label for="threshold-slider" class="block font-medium text-gray-700">Sicherheitsschwelle: <span id="threshold-value" class="font-bold text-indigo-600">0.95</span></label>
-                    <input id="threshold-slider" type="range" min="0.5" max="1.0" value="0.95" step="0.01" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                    <p class="text-sm text-gray-500 mt-1">Wie sicher soll die KI sein, dass es ein Uhu-Ruf ist? (1.0 = 100% sicher)</p>
-                </div>
-
                 <div class="bg-gray-50 p-4 rounded-lg">
                     <details>
                         <summary class="font-medium cursor-pointer text-gray-700">Erweiterte Einstellungen</summary>
@@ -113,16 +105,14 @@
                 </div>
             </div>
 
-            <!-- Analysis Progress Section -->
             <div id="analysis-progress" class="hidden text-center my-8">
                  <div class="loader mx-auto"></div>
                  <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
                  <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
-                    <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
-                </div>
+                     <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                 </div>
             </div>
 
-            <!-- Results Section -->
             <div id="results-section" class="hidden mt-10">
                 <h2 id="results-title" class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">2. Ergebnisse</h2>
                 <div id="results-summary"></div>
@@ -149,8 +139,6 @@
         const fileUploader = document.getElementById('file-uploader');
         const fileListDiv = document.getElementById('file-list');
         const paramsSection = document.getElementById('parameters-section');
-        const thresholdSlider = document.getElementById('threshold-slider');
-        const thresholdValue = document.getElementById('threshold-value');
         const overlapSlider = document.getElementById('overlap-slider');
         const overlapValue = document.getElementById('overlap-value');
         const mergeCheckbox = document.getElementById('merge-checkbox');
@@ -190,9 +178,6 @@
             handleFiles(e.dataTransfer.files);
         });
 
-        thresholdSlider.addEventListener('input', (e) => {
-            thresholdValue.textContent = parseFloat(e.target.value).toFixed(2);
-        });
         overlapSlider.addEventListener('input', (e) => {
             overlapValue.textContent = `${e.target.value}%`;
         });
@@ -333,7 +318,7 @@
                     }
                 }
 
-                const threshold = parseFloat(thresholdSlider.value);
+                const threshold = 0.5; // Festgelegter Schwellenwert
                 const overlapPercent = parseInt(overlapSlider.value);
                 const shouldMerge = mergeCheckbox.checked;
                 const strideSec = WINDOW_SEC * (1 - overlapPercent / 100.0);
