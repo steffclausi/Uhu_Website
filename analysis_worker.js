@@ -1,5 +1,8 @@
 // Wichtig: TensorFlow.js im Worker-Kontext importieren
 importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
+// NEU: Eine Bibliothek importieren, die Audio im Worker dekodieren kann
+importScripts('https://cdn.jsdelivr.net/npm/decode-audio-data-fast/dist/decode-audio-data-fast.min.js');
+
 
 // Globale Konfiguration & Vorverarbeitungsfunktionen (hierher verschoben)
 let model = null;
@@ -16,6 +19,41 @@ const AUDIO_CONFIG = {
     MIN_FREQ: 200,
     MAX_FREQ: 5000,
 };
+
+// NEU: Eine manuelle Funktion zum Resampling der Audiodaten
+function resample(audioBuffer, targetSampleRate) {
+    const sourceSampleRate = audioBuffer.sampleRate;
+    if (sourceSampleRate === targetSampleRate) {
+        return audioBuffer.getChannelData(0);
+    }
+    const sourceData = audioBuffer.getChannelData(0); // Mono
+    const sourceLength = sourceData.length;
+    const ratio = sourceSampleRate / targetSampleRate;
+    const targetLength = Math.round(sourceLength / ratio);
+    const resampledData = new Float32Array(targetLength);
+
+    for (let i = 0; i < targetLength; i++) {
+        const sourceIndex = i * ratio;
+        const indexPrev = Math.floor(sourceIndex);
+        const indexNext = Math.min(indexPrev + 1, sourceLength - 1);
+        const t = sourceIndex - indexPrev;
+        resampledData[i] = (1 - t) * sourceData[indexPrev] + t * sourceData[indexNext];
+    }
+    return resampledData;
+}
+
+
+// GEÄNDERT: Diese Funktion nutzt nun die neue Bibliothek und die manuelle Resampling-Funktion
+async function decodeAndStandardizeAudio(file) {
+    const arrayBuffer = await file.arrayBuffer();
+    // decodeAudioData kommt von der importierten Bibliothek
+    const audioBuffer = await self.decodeAudioData(arrayBuffer);
+    
+    // Resampling auf unsere Ziel-Sample-Rate
+    const monoData = resample(audioBuffer, AUDIO_CONFIG.SAMPLE_RATE);
+    return monoData;
+}
+
 
 function createMelFilterbank(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
     const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
@@ -75,21 +113,6 @@ function audioToMelspectrogram(y) {
         const logMelSpectrogram = tf.log(melSpectrogram.add(1e-6));
         return logMelSpectrogram.expandDims(-1);
     });
-}
-
-async function decodeAndStandardizeAudio(file) {
-    const audioCtx = new OfflineAudioContext(1, 1, AUDIO_CONFIG.SAMPLE_RATE); // Temporärer Kontext
-    const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-    
-    // Resampling und Konvertierung zu Mono
-    const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * AUDIO_CONFIG.SAMPLE_RATE, AUDIO_CONFIG.SAMPLE_RATE);
-    const source = offlineCtx.createBufferSource();
-    source.buffer = audioBuffer;
-    source.connect(offlineCtx.destination);
-    source.start(0);
-    const renderedBuffer = await offlineCtx.startRendering();
-    return renderedBuffer.getChannelData(0);
 }
 
 function mergeEvents(candidates) {
