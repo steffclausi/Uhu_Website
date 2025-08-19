@@ -1,144 +1,13 @@
-<!DOCTYPE html>
-<html lang="de">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🦉 Uhu-Ruf-Detektor</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-    <style>
-        body {
-            font-family: 'Inter', sans-serif;
-        }
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&display=swap');
-        .custom-file-input::-webkit-file-upload-button {
-            visibility: hidden;
-        }
-        .custom-file-input::before {
-            content: 'Audiodateien auswählen';
-            display: inline-block;
-            background: #4f46e5;
-            color: white;
-            border-radius: 0.375rem;
-            padding: 0.5rem 1rem;
-            outline: none;
-            white-space: nowrap;
-            -webkit-user-select: none;
-            cursor: pointer;
-            font-weight: 500;
-            margin-right: 1rem;
-        }
-        .custom-file-input:hover::before {
-            background: #4338ca;
-        }
-        .custom-file-input:active::before {
-            background: #3730a3;
-        }
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #4f46e5;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-    </style>
-</head>
-<body class="bg-gray-50 text-gray-800">
-
-    <div class="container mx-auto p-4 md:p-8 max-w-7xl">
-        <header class="text-center mb-8">
-            <h1 class="text-4xl md:text-5xl font-bold text-gray-900">🦉 Uhu-Ruf-Detektor</h1>
-            <p class="mt-4 text-lg text-gray-600">Laden Sie eine oder mehrere Audiodateien hoch, um sie automatisch nach Uhu-Rufen zu durchsuchen.</p>
-        </header>
-
-        <main class="bg-white p-6 md:p-8 rounded-2xl shadow-lg">
-            
-            <div class="mb-8 text-center">
-                <label for="file-uploader" class="block text-lg font-medium text-gray-700 mb-2">Audiodateien hierher ziehen</label>
-                <div class="mt-2 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md">
-                    <div class="space-y-1 text-center">
-                        <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48" aria-hidden="true">
-                            <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                        </svg>
-                        <div class="flex text-sm text-gray-600">
-                            <label for="file-uploader" class="relative cursor-pointer bg-white rounded-md font-medium text-indigo-600 hover:text-indigo-500 focus-within:outline-none focus-within:ring-2 focus-within:ring-offset-2 focus-within:ring-indigo-500">
-                                <span>Dateien hochladen</span>
-                                <input id="file-uploader" name="file-uploader" type="file" class="sr-only" multiple accept="audio/wav, audio/mp3, audio/flac, audio/m4a, audio/ogg, audio/opus">
-                            </label>
-                            <p class="pl-1">oder per Drag & Drop</p>
-                        </div>
-                        <p class="text-xs text-gray-500">WAV, MP3, FLAC, M4A, OGG, OPUS</p>
-                    </div>
-                </div>
-                <div id="file-list" class="mt-4 text-left"></div>
-            </div>
-
-            <div id="parameters-section" class="hidden">
-                <h2 class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">1. Parameter einstellen</h2>
-                
-                <div class="bg-gray-50 p-4 rounded-lg">
-                    <details>
-                        <summary class="font-medium cursor-pointer text-gray-700">Erweiterte Einstellungen</summary>
-                        <div class="mt-4">
-                            <div class="flex items-center mb-4">
-                                <input id="merge-checkbox" type="checkbox" checked class="h-4 w-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500">
-                                <label for="merge-checkbox" class="ml-2 block text-sm text-gray-900">Überlappende Erkennungen zusammenführen</label>
-                            </div>
-                            <div>
-                                <label for="overlap-slider" class="block font-medium text-gray-700">Analyse-Überlappung: <span id="overlap-value" class="font-bold text-indigo-600">50%</span></label>
-                                <input id="overlap-slider" type="range" min="0" max="95" value="50" step="5" class="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
-                                <p class="text-sm text-gray-500 mt-1">Eine höhere Überlappung findet kurze Rufe zuverlässiger, die Analyse dauert aber länger.</p>
-                            </div>
-                        </div>
-                    </details>
-                </div>
-                
-                <div class="mt-8 text-center">
-                    <button id="start-analysis-btn" class="bg-indigo-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-indigo-700 transition-colors duration-300 text-lg shadow-md">
-                        🚀 Analyse starten
-                    </button>
-                </div>
-            </div>
-
-            <div id="analysis-progress" class="hidden text-center my-8">
-                 <div class="loader mx-auto"></div>
-                 <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
-                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
-                      <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
-                 </div>
-            </div>
-
-            <div id="results-section" class="hidden mt-10">
-                <h2 id="results-title" class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">2. Ergebnisse</h2>
-                <div id="results-summary"></div>
-                <div id="results-grid" class="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
-            </div>
-
-        </main>
-    </div>
-
-    <script type="module">
-        // --- Globale Konfiguration (aus Node.js-Trainingsskript übernommen) ---
-        const MODEL_PATH = './uhu_model_js/model.json'; // WICHTIG: Pfad zur konvertierten model.json
+<script type="module">
+        // --- Globale Konfiguration (nur was für die UI gebraucht wird) ---
+        const MODEL_PATH = './uhu_model_js/model.json';
         const MAX_CLIPS_TO_SHOW = 20;
 
         const AUDIO_CONFIG = {
-            SAMPLE_RATE: 16000,      // Abtastrate in Hz
-            DURATION: 3,             // Zieldauer der Clips in Sekunden
-            N_MELS: 64,              // Anzahl der Mel-Frequenzbänder
-            N_FFT: 1024,             // Fenstergröße für die FFT
-            HOP_LENGTH: 512,         // Schrittweite für die FFT
-            TARGET_SAMPLES: 16000 * 3,
-            MIN_FREQ: 200,           // Untere Grenzfrequenz in Hz
-            MAX_FREQ: 5000,          // Obere Grenzfrequenz in Hz
+            SAMPLE_RATE: 16000,
         };
 
-        // --- UI-Elemente ---
+        // --- UI-Elemente (bleibt gleich) ---
         const fileUploader = document.getElementById('file-uploader');
         const fileListDiv = document.getElementById('file-list');
         const paramsSection = document.getElementById('parameters-section');
@@ -155,13 +24,10 @@
         const resultsGrid = document.getElementById('results-grid');
 
         let uploadedFiles = [];
-        let model = null;
+        let analysisWorker = null; // Variable für unseren Worker
 
-        // --- Event Listeners ---
-        fileUploader.addEventListener('change', (e) => {
-            handleFiles(e.target.files);
-        });
-
+        // --- Event Listeners (bleiben gleich) ---
+        fileUploader.addEventListener('change', (e) => handleFiles(e.target.files));
         const dropZone = fileUploader.closest('.border-dashed');
         dropZone.addEventListener('dragover', (e) => {
             e.preventDefault();
@@ -179,7 +45,6 @@
             dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
             handleFiles(e.dataTransfer.files);
         });
-
         overlapSlider.addEventListener('input', (e) => {
             overlapValue.textContent = `${e.target.value}%`;
         });
@@ -197,152 +62,8 @@
         }
         
         // ========================================================================
-        // NEUE VORVERARBEITUNG (aus Node.js-Skript portiert)
+        // NEUE, SCHLANKE runAnalysis FUNKTION
         // ========================================================================
-
-        /**
-         * Erstellt eine Mel-Filterbank-Matrix. Diese Funktion ist eine exakte
-         * Portierung der Implementierung aus dem Trainingsskript.
-         */
-        function createMelFilterbank(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
-            // Umrechnungsformeln zwischen Hz und Mel
-            const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
-            const melToHz = (mel) => 700.0 * (Math.exp(mel / 1127.0) - 1.0);
-
-            const lowerMel = hzToMel(lowerEdgeHz);
-            const upperMel = hzToMel(upperEdgeHz);
-            
-            // Die Mel-Punkte werden linear im Mel-Raum verteilt.
-            const melPoints = tf.linspace(lowerMel, upperMel, numMelBins + 2).arraySync();
-            const hzPoints = melPoints.map(melToHz);
-            
-            const spectrogramBinHz = sampleRate / 2.0 / (numSpectrogramBins - 1);
-            const spectrogramBinEdges = Array.from({ length: numSpectrogramBins }, (_, i) => i * spectrogramBinHz);
-
-            const melWeights = tf.buffer([numSpectrogramBins, numMelBins]);
-            for (let i = 0; i < numMelBins; i++) {
-                const leftEdge = hzPoints[i];
-                const center = hzPoints[i + 1];
-                const rightEdge = hzPoints[i + 2];
-
-                for (let j = 0; j < numSpectrogramBins; j++) {
-                    const specHz = spectrogramBinEdges[j];
-                    let weight = 0.0;
-                    if (specHz >= leftEdge && specHz <= center) {
-                        // Der Anstieg ist linear von 0 (am linken Rand) bis 1 (im Zentrum).
-                        const denominator = center - leftEdge;
-                        if (denominator > 0) weight = (specHz - leftEdge) / denominator;
-                    } else if (specHz > center && specHz <= rightEdge) {
-                        // Der Abfall ist linear von 1 (im Zentrum) bis 0 (am rechten Rand).
-                        const denominator = rightEdge - center;
-                        if (denominator > 0) weight = (rightEdge - specHz) / denominator;
-                    }
-                     melWeights.set(weight, j, i);
-                }
-            }
-            return melWeights.toTensor();
-        }
-
-        /**
-         * Konvertiert einen rohen Audio-Clip in ein Mel-Spektrogramm.
-         * Diese Pipeline entspricht exakt dem Node.js-Trainingsskript.
-         * @param {Float32Array} y Ein roher Mono-Audio-Clip.
-         * @returns {tf.Tensor} Das Mel-Spektrogramm als Tensor.
-         */
-        function audioToMelspectrogram(y) {
-            // Normalisiere die Länge: Padde oder schneide ab
-            if (y.length > AUDIO_CONFIG.TARGET_SAMPLES) {
-                y = y.slice(0, AUDIO_CONFIG.TARGET_SAMPLES);
-            } else if (y.length < AUDIO_CONFIG.TARGET_SAMPLES) {
-                const padding = new Float32Array(AUDIO_CONFIG.TARGET_SAMPLES - y.length).fill(0);
-                const newY = new Float32Array(AUDIO_CONFIG.TARGET_SAMPLES);
-                newY.set(y);
-                newY.set(padding, y.length);
-                y = newY;
-            }
-
-            // tf.tidy sorgt für automatisches Aufräumen von Tensoren
-            return tf.tidy(() => {
-                const inputTensor = tf.tensor1d(y);
-
-                // 1. STFT (Short-Time Fourier Transform)
-                const stft = tf.signal.stft(inputTensor, AUDIO_CONFIG.N_FFT, AUDIO_CONFIG.HOP_LENGTH);
-
-                // 2. Bandpass-Filter im Frequenzbereich anwenden
-                const freqBinCount = AUDIO_CONFIG.N_FFT / 2 + 1;
-                const minBin = Math.round(AUDIO_CONFIG.MIN_FREQ * AUDIO_CONFIG.N_FFT / AUDIO_CONFIG.SAMPLE_RATE);
-                const maxBin = Math.round(AUDIO_CONFIG.MAX_FREQ * AUDIO_CONFIG.N_FFT / AUDIO_CONFIG.SAMPLE_RATE);
-
-                const bandpassMaskValues = new Float32Array(freqBinCount);
-                for (let i = 0; i < freqBinCount; i++) {
-                    if (i >= minBin && i <= maxBin) {
-                        bandpassMaskValues[i] = 1;
-                    } else {
-                        bandpassMaskValues[i] = 0;
-                    }
-                }
-                const bandpassMask = tf.tensor1d(bandpassMaskValues);
-                const filteredStft = stft.mul(bandpassMask);
-
-                // 3. Mel-Spektrogramm erstellen
-                const powerSpectrogram = tf.square(tf.abs(filteredStft));
-                
-                const melMatrix = createMelFilterbank(
-                    AUDIO_CONFIG.N_MELS, freqBinCount, AUDIO_CONFIG.SAMPLE_RATE, 0, AUDIO_CONFIG.SAMPLE_RATE / 2
-                );
-
-                const melSpectrogram = tf.matMul(powerSpectrogram, melMatrix);
-
-                // 4. Konvertiere zu logarithmischer Skala (wie im Training)
-                const logMelSpectrogram = tf.log(melSpectrogram.add(1e-6)); // Epsilon für numerische Stabilität
-
-                // WICHTIG: Das Modell erwartet die Form [Zeit, Mels, Kanal].
-                // Wir expandieren die letzte Dimension für den "Kanal".
-                return logMelSpectrogram.expandDims(-1);
-            });
-        }
-        
-        // ========================================================================
-        // ENDE DER NEUEN VORVERARBEITUNG
-        // ========================================================================
-
-        async function decodeAndStandardizeAudio(file) {
-            // Erstelle einen AudioContext mit der Ziel-Abtastrate
-            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_CONFIG.SAMPLE_RATE });
-            const arrayBuffer = await file.arrayBuffer();
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
-            // Resampling wird hier durch den AudioContext erledigt.
-            // Sicherstellen, dass die Ausgabe Mono ist
-            if (audioBuffer.numberOfChannels > 1) {
-                const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * AUDIO_CONFIG.SAMPLE_RATE, AUDIO_CONFIG.SAMPLE_RATE);
-                const source = offlineCtx.createBufferSource();
-                source.buffer = audioBuffer;
-                source.connect(offlineCtx.destination);
-                source.start(0);
-                const renderedBuffer = await offlineCtx.startRendering();
-                return renderedBuffer.getChannelData(0);
-            }
-            
-            return audioBuffer.getChannelData(0); // Bereits Mono und resampled
-        }
-        
-        function mergeEvents(candidates) {
-            if (!candidates || candidates.length === 0) return [];
-            candidates.sort((a, b) => a.start - b.start);
-            const merged = [Object.assign({}, candidates[0])];
-            for (let i = 1; i < candidates.length; i++) {
-                const last = merged[merged.length - 1];
-                const current = candidates[i];
-                if (current.start <= last.end) {
-                    last.end = Math.max(last.end, current.end);
-                    last.prob = Math.max(last.prob, current.prob);
-                } else {
-                    merged.push(Object.assign({}, current));
-                }
-            }
-            return merged;
-        }
 
         async function runAnalysis() {
             if (uploadedFiles.length === 0) {
@@ -350,222 +71,221 @@
                 return;
             }
 
+            // UI für den Start vorbereiten
             startBtn.disabled = true;
             startBtn.classList.add('opacity-50', 'cursor-not-allowed');
             analysisProgress.classList.remove('hidden');
             resultsSection.classList.add('hidden');
             resultsGrid.innerHTML = '';
             resultsSummary.innerHTML = '';
+            progressText.textContent = 'Initialisiere Analyse...';
+            progressBar.style.width = '0%';
 
-            try {
-                if (!model) {
-                    progressText.textContent = 'Lade Erkennungsmodell...';
-                    try {
-                        model = await tf.loadLayersModel(MODEL_PATH);
-                        // "Warm-up" des Modells
-                        const specShape = model.inputs[0].shape.slice(1); // [time, mels, channel]
-                        const dummyInput = tf.zeros([1, ...specShape]);
-                        model.predict(dummyInput).dispose();
-                        dummyInput.dispose();
-                    } catch (error) {
-                        progressText.textContent = `Fehler beim Laden des Modells: ${MODEL_PATH} nicht gefunden. Stellen Sie sicher, dass die Datei existiert und der Pfad korrekt ist.`;
-                        console.error("Modell-Ladefehler:", error);
-                        return;
-                    }
-                }
+            // Worker erstellen und starten
+            analysisWorker = new Worker('analysis_worker.js');
 
-                const threshold = 0.5; // Fester Schwellenwert
-                const overlapPercent = parseInt(overlapSlider.value);
-                const shouldMerge = mergeCheckbox.checked;
-                const strideSec = AUDIO_CONFIG.DURATION * (1 - overlapPercent / 100.0);
-                const strideSamples = Math.round(strideSec * AUDIO_CONFIG.SAMPLE_RATE);
+            // Listener für Nachrichten VOM Worker
+            analysisWorker.onmessage = (event) => {
+                const { type, data } = event.data;
 
-                let allEvents = [];
-
-                for (let i = 0; i < uploadedFiles.length; i++) {
-                    const file = uploadedFiles[i];
-                    progressText.textContent = `Analysiere: ${file.name} (${i+1}/${uploadedFiles.length})`;
-                    
-                    try {
-                        const y = await decodeAndStandardizeAudio(file);
-                        const specs = [];
-                        const starts = [];
-                        
-                        // Sliding window über die Audiodatei
-                        for (let start = 0; start + AUDIO_CONFIG.TARGET_SAMPLES <= y.length; start += strideSamples) {
-                            const end = start + AUDIO_CONFIG.TARGET_SAMPLES;
-                            let clip = y.slice(start, end);
-
-                            // HIER WIRD DIE NEUE FUNKTION VERWENDET
-                            const spec = audioToMelspectrogram(clip);
-                            specs.push(spec);
-                            starts.push(start);
+                switch (type) {
+                    case 'progress':
+                        progressText.textContent = data.text;
+                        if (data.progress) {
+                             progressBar.style.width = `${data.progress}%`;
                         }
-
-                        // Update progress bar after preprocessing one file
-                        progressBar.style.width = `${((i + 0.5) / uploadedFiles.length) * 100}%`;
-
-                        if (specs.length > 0) {
-                            const X = tf.stack(specs); // Ergibt [batch, time, mels, channel]
-                            const probs = await model.predict(X).data();
-                            
-                            tf.dispose(X); // Wichtig: Speicher freigeben
-                            tf.dispose(specs);
-
-                            let candidates = [];
-                            for (let j = 0; j < probs.length; j++) {
-                                if (probs[j] >= threshold) {
-                                    candidates.push({
-                                        start: starts[j],
-                                        end: starts[j] + AUDIO_CONFIG.TARGET_SAMPLES,
-                                        prob: probs[j],
-                                        file: file.name,
-                                        audioClip: y.slice(starts[j], starts[j] + AUDIO_CONFIG.TARGET_SAMPLES)
-                                    });
-                                }
-                            }
-                            
-                            const fileEvents = shouldMerge ? mergeEvents(candidates) : candidates;
-                            allEvents.push(...fileEvents);
-                        }
-                    } catch (e) {
-                        console.error(`Fehler bei der Verarbeitung von ${file.name}:`, e);
-                        alert(`Konnte Datei '${file.name}' nicht verarbeiten: ${e.message}`);
-                    }
-                }
-                
-                progressBar.style.width = '100%';
-                progressText.textContent = 'Analyse abgeschlossen!';
-                displayResults(allEvents);
-
-            } catch (error) {
-                console.error("Ein Fehler ist aufgetreten:", error);
-                progressText.textContent = `Ein Fehler ist aufgetreten: ${error.message}`;
-            } finally {
-                startBtn.disabled = false;
-                startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                setTimeout(() => {
-                    analysisProgress.classList.add('hidden');
-                    progressBar.style.width = '0%';
-                }, 2000);
-            }
-        }
-
-        // --- Ergebnisdarstellung (unverändert) ---
-
-        function createWavBlob(samples, sampleRate) {
-            const buffer = new ArrayBuffer(44 + samples.length * 2);
-            const view = new DataView(buffer);
-
-            const writeString = (view, offset, string) => {
-                for (let i = 0; i < string.length; i++) {
-                    view.setUint8(offset + i, string.charCodeAt(i));
+                        break;
+                    case 'done':
+                        displayResults(data); // Ergebnis anzeigen
+                        terminateWorker();
+                        break;
+                    case 'error':
+                        console.error("Fehler vom Worker erhalten:", data);
+                        progressText.textContent = `Ein Fehler ist aufgetreten: ${data}`;
+                        alert(`Ein Analysefehler ist aufgetreten: ${data}`);
+                        terminateWorker();
+                        break;
                 }
             };
 
+            // Listener für Fehler im Worker
+            analysisWorker.onerror = (error) => {
+                console.error("Ein kritischer Fehler ist im Worker aufgetreten:", error);
+                progressText.textContent = `Ein kritischer Fehler ist aufgetreten: ${error.message}`;
+                terminateWorker();
+            };
+
+            // Parameter sammeln
+            const params = {
+                threshold: 0.5,
+                overlapPercent: parseInt(overlapSlider.value),
+                shouldMerge: mergeCheckbox.checked,
+            };
+
+            // Nachricht AN den Worker senden, um die Analyse zu starten
+            analysisWorker.postMessage({
+                files: uploadedFiles,
+                params: params,
+                modelPath: MODEL_PATH
+            });
+        }
+        
+        function terminateWorker() {
+             if (analysisWorker) {
+                analysisWorker.terminate();
+                analysisWorker = null;
+            }
+            startBtn.disabled = false;
+            startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            // Kurze Verzögerung, damit der "Abgeschlossen"-Text sichtbar ist
+            setTimeout(() => {
+                analysisProgress.classList.add('hidden');
+                progressBar.style.width = '0%';
+            }, 2000);
+        }
+
+        // --- Ergebnisdarstellung (bleibt größtenteils gleich) ---
+        
+        // Die `audioToMelspectrogram`-Funktion wird hier nur noch für die *Visualisierung* gebraucht.
+        // Dafür müssen wir sie hier behalten, aber sie ist nicht mehr Teil der Analyse-Pipeline.
+        // Alternative: Man könnte auch das Spektrogramm-Array vom Worker zurücksenden.
+        // Der Einfachheit halber berechnen wir es hier neu.
+        
+        let localModelForViz = null; // Wir brauchen tfjs auch hier, nur für die Visualisierung
+
+        async function getSpecForViz(audioClip) {
+            // Eine abgespeckte Version, nur für die Visualisierung
+            if (!window.tf) return null; // Fallback, falls tfjs nicht geladen ist
+            
+            // Erstellen Sie die Vorverarbeitungsfunktionen hier erneut, aber nur für die Visualisierung
+             function audioToMelspectrogramForViz(y) {
+                const DURATION = 3;
+                const TARGET_SAMPLES = 16000 * DURATION;
+                const N_FFT = 1024;
+                const HOP_LENGTH = 512;
+                const N_MELS = 64;
+
+                if (y.length > TARGET_SAMPLES) {
+                    y = y.slice(0, TARGET_SAMPLES);
+                } else if (y.length < TARGET_SAMPLES) {
+                    const padding = new Float32Array(TARGET_SAMPLES - y.length).fill(0);
+                    const newY = new Float32Array(TARGET_SAMPLES); newY.set(y); newY.set(padding, y.length); y = newY;
+                }
+                return tf.tidy(() => {
+                    const stft = tf.signal.stft(tf.tensor1d(y), N_FFT, HOP_LENGTH);
+                    const powerSpectrogram = tf.square(tf.abs(stft));
+                    const melMatrix = createMelFilterbank(N_MELS, N_FFT / 2 + 1, 16000, 0, 16000 / 2);
+                    const melSpectrogram = tf.matMul(powerSpectrogram, melMatrix);
+                    const logMelSpectrogram = tf.log(melSpectrogram.add(1e-6));
+                    return logMelSpectrogram.expandDims(-1);
+                });
+            }
+            function createMelFilterbank(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
+                const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
+                const melToHz = (mel) => 700.0 * (Math.exp(mel / 1127.0) - 1.0);
+                const lowerMel = hzToMel(lowerEdgeHz);
+                const upperMel = hzToMel(upperEdgeHz);
+                const melPoints = tf.linspace(lowerMel, upperMel, numMelBins + 2).arraySync();
+                const hzPoints = melPoints.map(melToHz);
+                const spectrogramBinHz = sampleRate / 2.0 / (numSpectrogramBins - 1);
+                const spectrogramBinEdges = Array.from({ length: numSpectrogramBins }, (_, i) => i * spectrogramBinHz);
+                const melWeights = tf.buffer([numSpectrogramBins, numMelBins]);
+                for (let i = 0; i < numMelBins; i++) {
+                    const leftEdge = hzPoints[i], center = hzPoints[i+1], rightEdge = hzPoints[i+2];
+                    for (let j = 0; j < numSpectrogramBins; j++) {
+                        const specHz = spectrogramBinEdges[j];
+                        let weight = 0.0;
+                        if (specHz >= leftEdge && specHz <= center) weight = (specHz - leftEdge) / (center - leftEdge);
+                        else if (specHz > center && specHz <= rightEdge) weight = (rightEdge - specHz) / (rightEdge - center);
+                        if(weight > 0) melWeights.set(weight, j, i);
+                    }
+                }
+                return melWeights.toTensor();
+            }
+
+            return audioToMelspectrogramForViz(audioClip);
+        }
+
+        // --- Alle weiteren Funktionen (createWavBlob, displayResults, drawSpectrogram) bleiben unverändert ---
+        // ... (Kopieren Sie den Rest Ihrer Funktionen von createWavBlob bis zum Ende hierher)
+        
+        function createWavBlob(samples, sampleRate) {
+            const buffer = new ArrayBuffer(44 + samples.length * 2);
+            const view = new DataView(buffer);
+            const writeString = (view, offset, string) => { for (let i = 0; i < string.length; i++) { view.setUint8(offset + i, string.charCodeAt(i)); } };
             writeString(view, 0, 'RIFF');
             view.setUint32(4, 36 + samples.length * 2, true);
             writeString(view, 8, 'WAVE');
             writeString(view, 12, 'fmt ');
             view.setUint32(16, 16, true);
-            view.setUint16(20, 1, true); // Mono
-            view.setUint16(22, 1, true); // 1 Channel
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
             view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true); // Byte Rate
-            view.setUint16(32, 2, true); // Block Align
-            view.setUint16(34, 16, true); // Bits per Sample
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
             writeString(view, 36, 'data');
             view.setUint32(40, samples.length * 2, true);
-
             let offset = 44;
             for (let i = 0; i < samples.length; i++, offset += 2) {
                 const s = Math.max(-1, Math.min(1, samples[i]));
                 view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
             }
-
             return new Blob([view], { type: 'audio/wav' });
         }
 
         function displayResults(events) {
             resultsSection.classList.remove('hidden');
             resultsTitle.textContent = `2. Ergebnisse: ${events.length} Uhu-Rufe gefunden`;
-
             if (events.length === 0) {
                 resultsSummary.innerHTML = `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-md" role="alert"><p>Es wurden keine Ereignisse über dem eingestellten Schwellenwert gefunden.</p></div>`;
                 return;
             }
-
             events.sort((a, b) => b.prob - a.prob);
-
-            const csvContent = "data:text/csv;charset=utf-8," 
-                + "file,start_s,end_s,probability\n" 
-                + events.map(e => `${e.file},${(e.start / AUDIO_CONFIG.SAMPLE_RATE).toFixed(2)},${(e.end / AUDIO_CONFIG.SAMPLE_RATE).toFixed(2)},${e.prob.toFixed(3)}`).join("\n");
-            
+            const csvContent = "data:text/csv;charset=utf-8," + "file,start_s,end_s,probability\n" + events.map(e => `${e.file},${(e.start / AUDIO_CONFIG.SAMPLE_RATE).toFixed(2)},${(e.end / AUDIO_CONFIG.SAMPLE_RATE).toFixed(2)},${e.prob.toFixed(3)}`).join("\n");
             const encodedUri = encodeURI(csvContent);
             resultsSummary.innerHTML = `<a href="${encodedUri}" download="uhu_events.csv" class="inline-block bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">📄 Alle ${events.length} Erkennungen als CSV herunterladen</a>`;
-
             const clipsToShow = events.slice(0, MAX_CLIPS_TO_SHOW);
             resultsGrid.innerHTML = `<h3 class="col-span-full text-xl font-bold text-gray-800 mt-6 mb-2">Erkannte Clips (Top ${clipsToShow.length})</h3>`;
-            
             clipsToShow.forEach(event => {
                 const card = document.createElement('div');
                 card.className = 'bg-gray-50 p-4 rounded-lg shadow';
-                
                 const specCanvas = document.createElement('canvas');
                 specCanvas.width = 200;
                 specCanvas.height = 128;
-                
                 const audio = new Audio();
                 const blob = createWavBlob(event.audioClip, AUDIO_CONFIG.SAMPLE_RATE);
                 audio.src = URL.createObjectURL(blob);
                 audio.controls = true;
                 audio.className = 'w-full mt-2';
-
                 card.innerHTML = `
                     <p class="text-sm font-medium truncate" title="${event.file}">${event.file}</p>
                     <p class="text-xs text-indigo-600 font-bold">Wahrscheinlichkeit: ${(event.prob * 100).toFixed(1)}%</p>
                 `;
                 card.appendChild(specCanvas);
                 card.appendChild(audio);
-                
                 resultsGrid.appendChild(card);
-                
-                // Erstelle Spektrogramm nur für die Visualisierung
-                const specTensorForViz = audioToMelspectrogram(event.audioClip);
-                drawSpectrogram(specTensorForViz, specCanvas);
-                tf.dispose(specTensorForViz);
+                const specTensorForViz = getSpecForViz(event.audioClip);
+                if (specTensorForViz) {
+                    drawSpectrogram(specTensorForViz, specCanvas);
+                    tf.dispose(specTensorForViz);
+                }
             });
         }
 
         function drawSpectrogram(spec3D, canvas) {
             tf.tidy(() => {
-                const spec2D = spec3D.squeeze(); // Entferne die Kanal-Dimension
-                const specTransposed = spec2D.transpose(); // Transponieren für die Darstellung [mels, time]
-
+                const spec2D = spec3D.squeeze();
+                const specTransposed = spec2D.transpose();
                 const ctx = canvas.getContext('2d');
-                const [height, width] = specTransposed.shape; // Höhe = N_MELS, Breite = Zeit
-                const canvasWidth = canvas.width;
-                const canvasHeight = canvas.height;
-                
+                const [height, width] = specTransposed.shape;
+                const canvasWidth = canvas.width, canvasHeight = canvas.height;
                 const specArray = specTransposed.arraySync();
-                
                 let minVal = Infinity, maxVal = -Infinity;
-                for(let i=0; i<height; i++) {
-                    for(let j=0; j<width; j++) {
-                        if(specArray[i][j] < minVal) minVal = specArray[i][j];
-                        if(specArray[i][j] > maxVal) maxVal = specArray[i][j];
-                    }
-                }
+                for(let i=0; i<height; i++) { for(let j=0; j<width; j++) { if(specArray[i][j] < minVal) minVal = specArray[i][j]; if(specArray[i][j] > maxVal) maxVal = specArray[i][j]; } }
                 const range = maxVal - minVal;
-
-                const colWidth = canvasWidth / width;
-                const rowHeight = canvasHeight / height;
-
-                const viridis = [
-                    [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142],
-                    [31, 158, 137], [53, 183, 121], [109, 205, 89], [180, 222, 44], [253, 231, 37]
-                ];
-
+                const colWidth = canvasWidth / width, rowHeight = canvasHeight / height;
+                const viridis = [ [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142], [31, 158, 137], [53, 183, 121], [109, 205, 89], [180, 222, 44], [253, 231, 37] ];
                 const getColor = (value) => {
                     const i = Math.min(Math.max(Math.floor(value * (viridis.length - 1)), 0), viridis.length - 2);
                     const t = value * (viridis.length - 1) - i;
@@ -574,21 +294,15 @@
                     const b = Math.floor(viridis[i][2] + t * (viridis[i+1][2] - viridis[i][2]));
                     return `rgb(${r},${g},${b})`;
                 };
-                
                 ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-
                 for (let x = 0; x < width; x++) {
                     for (let y = 0; y < height; y++) {
                         const value = specArray[y][x];
                         const normalized = (value - minVal) / range;
                         ctx.fillStyle = getColor(normalized);
-                        // Y-Achse umkehren, damit niedrige Frequenzen unten sind
                         ctx.fillRect(x * colWidth, canvasHeight - (y + 1) * rowHeight, colWidth, rowHeight);
                     }
                 }
             });
         }
-
     </script>
-</body>
-</html>
