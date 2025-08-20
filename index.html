@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>🦉 Uhu-Ruf-Detektor</title>
+    <link rel="icon" type="image/png" href="favicon.png">
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
     <style>
@@ -109,13 +110,13 @@
                  <div class="loader mx-auto"></div>
                  <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
                  <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
-                      <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                       <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
                  </div>
             </div>
 
             <div id="results-section" class="hidden mt-10">
                 <h2 id="results-title" class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">2. Ergebnisse</h2>
-                <div id="results-summary"></div>
+                <div id="results-summary" class="mb-6"></div>
                 <div id="results-grid" class="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
             </div>
 
@@ -197,7 +198,7 @@
         }
         
         // ========================================================================
-        // NEUE VORVERARBEITUNG (aus Node.js-Skript portiert)
+        // VORVERARBEITUNG (aus Node.js-Skript portiert)
         // ========================================================================
 
         /**
@@ -303,7 +304,7 @@
         }
         
         // ========================================================================
-        // ENDE DER NEUEN VORVERARBEITUNG
+        // HAUPTFUNKTIONEN
         // ========================================================================
 
         async function decodeAndStandardizeAudio(file) {
@@ -396,7 +397,6 @@
                             const end = start + AUDIO_CONFIG.TARGET_SAMPLES;
                             let clip = y.slice(start, end);
 
-                            // HIER WIRD DIE NEUE FUNKTION VERWENDET
                             const spec = audioToMelspectrogram(clip);
                             specs.push(spec);
                             starts.push(start);
@@ -451,7 +451,7 @@
             }
         }
 
-        // --- Ergebnisdarstellung (unverändert) ---
+        // --- Ergebnisdarstellung ---
 
         function createWavBlob(samples, sampleRate) {
             const buffer = new ArrayBuffer(44 + samples.length * 2);
@@ -486,64 +486,100 @@
             return new Blob([view], { type: 'audio/wav' });
         }
 
+        /**
+         * Erstellt eine einzelne Ergebnis-Karte für die Anzeige.
+         * @param {object} event - Das Erkennungs-Event.
+         * @returns {HTMLElement} Das fertige card-Element.
+         */
+        function createResultCard(event) {
+            const card = document.createElement('div');
+            card.className = 'bg-gray-50 p-4 rounded-lg shadow';
+
+            const specCanvas = document.createElement('canvas');
+            specCanvas.width = 200;
+            specCanvas.height = 128;
+
+            const audio = new Audio();
+            const blob = createWavBlob(event.audioClip, AUDIO_CONFIG.SAMPLE_RATE);
+            audio.src = URL.createObjectURL(blob);
+            audio.controls = true;
+            audio.className = 'w-full mt-2';
+
+            card.innerHTML = `
+                <p class="text-sm font-medium truncate" title="${event.file}">${event.file}</p>
+                <p class="text-xs text-indigo-600 font-bold">Wahrscheinlichkeit: ${(event.prob * 100).toFixed(1)}%</p>
+            `;
+            card.appendChild(specCanvas);
+            card.appendChild(audio);
+
+            // Erstelle Spektrogramm nur für die Visualisierung
+            const specTensorForViz = audioToMelspectrogram(event.audioClip);
+            drawSpectrogram(specTensorForViz, specCanvas);
+            tf.dispose(specTensorForViz);
+
+            return card;
+        }
+
+        /**
+         * Stellt die Ergebnisse in zwei Kategorien dar.
+         * @param {Array} events - Eine Liste aller gefundenen Events.
+         */
         function displayResults(events) {
             resultsSection.classList.remove('hidden');
-            resultsTitle.textContent = `2. Ergebnisse: ${events.length} Uhu-Rufe gefunden`;
+            resultsGrid.innerHTML = ''; // Vorherige Ergebnisse löschen
+            resultsSummary.innerHTML = ''; // Summary ebenfalls leeren
+            resultsTitle.textContent = `2. Ergebnisse: ${events.length} mögliche Uhu-Rufe gefunden`;
 
             if (events.length === 0) {
-                resultsSummary.innerHTML = `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-md" role="alert"><p>Es wurden keine Ereignisse über dem eingestellten Schwellenwert gefunden.</p></div>`;
+                resultsSummary.innerHTML = `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-md" role="alert"><p>Es wurden keine Ereignisse über dem Schwellenwert von 50% gefunden.</p></div>`;
                 return;
             }
 
-            events.sort((a, b) => b.prob - a.prob);
+            // Events in zwei Kategorien filtern und sortieren
+            const highConfidenceEvents = events
+                .filter(e => e.prob >= 0.98)
+                .sort((a, b) => b.prob - a.prob);
 
-            const csvContent = "data:text/csv;charset=utf-8," 
-                + "file,start_s,end_s,probability\n" 
-                + events.map(e => `${e.file},${(e.start / AUDIO_CONFIG.SAMPLE_RATE).toFixed(2)},${(e.end / AUDIO_CONFIG.SAMPLE_RATE).toFixed(2)},${e.prob.toFixed(3)}`).join("\n");
-            
-            const encodedUri = encodeURI(csvContent);
-            resultsSummary.innerHTML = `<a href="${encodedUri}" download="uhu_events.csv" class="inline-block bg-green-600 text-white font-bold py-2 px-4 rounded-lg hover:bg-green-700 transition-colors">📄 Alle ${events.length} Erkennungen als CSV herunterladen</a>`;
+            const mediumConfidenceEvents = events
+                .filter(e => e.prob >= 0.5 && e.prob < 0.98)
+                .sort((a, b) => b.prob - a.prob);
 
-            const clipsToShow = events.slice(0, MAX_CLIPS_TO_SHOW);
-            resultsGrid.innerHTML = `<h3 class="col-span-full text-xl font-bold text-gray-800 mt-6 mb-2">Erkannte Clips (Top ${clipsToShow.length})</h3>`;
-            
-            clipsToShow.forEach(event => {
-                const card = document.createElement('div');
-                card.className = 'bg-gray-50 p-4 rounded-lg shadow';
-                
-                const specCanvas = document.createElement('canvas');
-                specCanvas.width = 200;
-                specCanvas.height = 128;
-                
-                const audio = new Audio();
-                const blob = createWavBlob(event.audioClip, AUDIO_CONFIG.SAMPLE_RATE);
-                audio.src = URL.createObjectURL(blob);
-                audio.controls = true;
-                audio.className = 'w-full mt-2';
+            // Kategorie 1: Hohe Wahrscheinlichkeit
+            if (highConfidenceEvents.length > 0) {
+                const title = document.createElement('h3');
+                title.className = 'col-span-full text-xl font-bold text-gray-800 mt-6 mb-2 text-green-700';
+                title.textContent = `✅ Uhu erkannt mit hoher Wahrscheinlichkeit (${highConfidenceEvents.length} Clips)`;
+                resultsGrid.appendChild(title);
 
-                card.innerHTML = `
-                    <p class="text-sm font-medium truncate" title="${event.file}">${event.file}</p>
-                    <p class="text-xs text-indigo-600 font-bold">Wahrscheinlichkeit: ${(event.prob * 100).toFixed(1)}%</p>
-                `;
-                card.appendChild(specCanvas);
-                card.appendChild(audio);
-                
-                resultsGrid.appendChild(card);
-                
-                // Erstelle Spektrogramm nur für die Visualisierung
-                const specTensorForViz = audioToMelspectrogram(event.audioClip);
-                drawSpectrogram(specTensorForViz, specCanvas);
-                tf.dispose(specTensorForViz);
-            });
+                const clipsToShow = highConfidenceEvents.slice(0, MAX_CLIPS_TO_SHOW);
+                clipsToShow.forEach(event => {
+                    resultsGrid.appendChild(createResultCard(event));
+                });
+            }
+
+            // Kategorie 2: Mittlere Wahrscheinlichkeit
+            if (mediumConfidenceEvents.length > 0) {
+                const title = document.createElement('h3');
+                title.className = 'col-span-full text-xl font-bold text-gray-800 mt-8 mb-2 text-yellow-700';
+                title.textContent = `🤔 Potentiell Uhu erkannt, bitte prüfen (${mediumConfidenceEvents.length} Clips)`;
+                resultsGrid.appendChild(title);
+
+                // Berechne, wie viele Plätze noch frei sind, falls MAX_CLIPS_TO_SHOW gilt
+                const remainingSlots = MAX_CLIPS_TO_SHOW - highConfidenceEvents.length;
+                const clipsToShow = mediumConfidenceEvents.slice(0, Math.max(0, remainingSlots));
+                clipsToShow.forEach(event => {
+                    resultsGrid.appendChild(createResultCard(event));
+                });
+            }
         }
 
         function drawSpectrogram(spec3D, canvas) {
             tf.tidy(() => {
-                const spec2D = spec3D.squeeze(); // Entferne die Kanal-Dimension
-                const specTransposed = spec2D.transpose(); // Transponieren für die Darstellung [mels, time]
+                const spec2D = spec3D.squeeze();
+                const specTransposed = spec2D.transpose();
 
-                const ctx = canvas.getContext('2d');
-                const [height, width] = specTransposed.shape; // Höhe = N_MELS, Breite = Zeit
+                const ctx = canvas.getContext('d');
+                const [height, width] = specTransposed.shape;
                 const canvasWidth = canvas.width;
                 const canvasHeight = canvas.height;
                 
