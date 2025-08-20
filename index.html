@@ -127,9 +127,10 @@
         self.importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
 
         let model = null;
-        let AUDIO_CONFIG = null; // Wird von der Hauptseite initialisiert
+        let AUDIO_CONFIG = null; 
 
         // --- HILFSFUNKTIONEN (im Worker-Scope) ---
+        // Die Funktion decodeAndStandardizeAudio wurde entfernt, da dies jetzt der Haupt-Thread erledigt.
 
         function createMelFilterbank(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
             const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
@@ -190,22 +191,6 @@
                 return logMelSpectrogram.expandDims(-1);
             });
         }
-
-        async function decodeAndStandardizeAudio(file) {
-            const audioCtx = new OfflineAudioContext(1, 1, AUDIO_CONFIG.SAMPLE_RATE); // Dummy context to get target sample rate
-            const arrayBuffer = await file.arrayBuffer();
-            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            if (audioBuffer.sampleRate === AUDIO_CONFIG.SAMPLE_RATE && audioBuffer.numberOfChannels === 1) {
-                return audioBuffer.getChannelData(0);
-            }
-            const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * AUDIO_CONFIG.SAMPLE_RATE, AUDIO_CONFIG.SAMPLE_RATE);
-            const source = offlineCtx.createBufferSource();
-            source.buffer = audioBuffer;
-            source.connect(offlineCtx.destination);
-            source.start(0);
-            const renderedBuffer = await offlineCtx.startRendering();
-            return renderedBuffer.getChannelData(0);
-        }
         
         function mergeEvents(candidates) {
             if (!candidates || candidates.length === 0) return [];
@@ -226,24 +211,24 @@
 
         // --- WORKER EVENT LISTENER ---
         self.onmessage = async (e) => {
-            const { file, params } = e.data;
-            AUDIO_CONFIG = params.audioConfig; // Konfiguration vom Haupt-Thread übernehmen
+            // KORREKTUR: Empfange rohe Audiodaten (y) anstatt des Datei-Objekts
+            const { audioData, fileName, params } = e.data;
+            const y = audioData;
+            AUDIO_CONFIG = params.audioConfig;
 
             try {
-                // Lade Modell, falls noch nicht geschehen
                 if (!model) {
                     self.postMessage({ type: 'progress', message: `Lade Erkennungsmodell...` });
                     model = await tf.loadLayersModel(params.modelPath);
-                    // "Warm-up"
                     const specShape = model.inputs[0].shape.slice(1);
                     const dummyInput = tf.zeros([1, ...specShape]);
                     model.predict(dummyInput).dispose();
                     dummyInput.dispose();
                 }
 
-                self.postMessage({ type: 'progress', message: `Analysiere: ${file.name}` });
+                self.postMessage({ type: 'progress', message: `Analysiere: ${fileName}` });
 
-                const y = await decodeAndStandardizeAudio(file);
+                // Der Dekodierschritt ist nicht mehr nötig.
                 const specs = [];
                 const starts = [];
                 const strideSec = AUDIO_CONFIG.DURATION * (1 - params.overlapPercent / 100.0);
@@ -271,7 +256,7 @@
                                 start: starts[j],
                                 end: starts[j] + AUDIO_CONFIG.TARGET_SAMPLES,
                                 prob: probs[j],
-                                file: file.name,
+                                file: fileName,
                                 audioClip: y.slice(starts[j], starts[j] + AUDIO_CONFIG.TARGET_SAMPLES)
                             });
                         }
@@ -279,19 +264,18 @@
                     fileEvents = params.shouldMerge ? mergeEvents(candidates) : candidates;
                 }
                 
-                // Sende Ergebnisse zurück zum Haupt-Thread
-                self.postMessage({ type: 'result', events: fileEvents, fileName: file.name });
+                self.postMessage({ type: 'result', events: fileEvents, fileName: fileName });
 
             } catch (error) {
-                console.error(`Worker-Fehler bei der Verarbeitung von ${file.name}:`, error);
-                self.postMessage({ type: 'error', message: `Fehler bei Datei '${file.name}': ${error.message}` });
+                console.error(`Worker-Fehler bei der Verarbeitung von ${fileName}:`, error);
+                self.postMessage({ type: 'error', message: `Fehler bei Datei '${fileName}': ${error.message}` });
             }
         };
     </script>
     
     <script type="module">
         // --- Globale Konfiguration ---
-        const MODEL_PATH = './uhu_model_js/model.json'; // Dies bleibt ein relativer Pfad
+        const MODEL_PATH = './uhu_model_js/model.json';
         const MAX_CLIPS_TO_SHOW = 20;
 
         const AUDIO_CONFIG = {
@@ -306,6 +290,7 @@
         };
 
         // --- UI-Elemente ---
+        // (unverändert)
         const fileUploader = document.getElementById('file-uploader');
         const fileListDiv = document.getElementById('file-list');
         const paramsSection = document.getElementById('parameters-section');
@@ -324,25 +309,13 @@
         let uploadedFiles = [];
 
         // --- Event Listeners ---
+        // (unverändert)
         fileUploader.addEventListener('change', (e) => handleFiles(e.target.files));
         const dropZone = fileUploader.closest('.border-dashed');
-        dropZone.addEventListener('dragover', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            dropZone.classList.add('border-indigo-500', 'bg-indigo-50');
-        });
-        dropZone.addEventListener('dragleave', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
-        });
-        dropZone.addEventListener('drop', (e) => {
-            e.preventDefault(); e.stopPropagation();
-            dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
-            handleFiles(e.dataTransfer.files);
-        });
-
-        overlapSlider.addEventListener('input', (e) => {
-            overlapValue.textContent = `${e.target.value}%`;
-        });
+        dropZone.addEventListener('dragover', (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.add('border-indigo-500', 'bg-indigo-50'); });
+        dropZone.addEventListener('dragleave', (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('border-indigo-500', 'bg-indigo-50'); });
+        dropZone.addEventListener('drop', (e) => { e.preventDefault(); e.stopPropagation(); dropZone.classList.remove('border-indigo-500', 'bg-indigo-50'); handleFiles(e.dataTransfer.files); });
+        overlapSlider.addEventListener('input', (e) => { overlapValue.textContent = `${e.target.value}%`; });
         startBtn.addEventListener('click', runAnalysis);
 
         function handleFiles(files) {
@@ -350,11 +323,30 @@
             if (uploadedFiles.length > 0) {
                 fileListDiv.innerHTML = `<h3 class="font-medium text-gray-700">Ausgewählte Dateien:</h3><ul class="list-disc list-inside text-sm text-gray-600">${uploadedFiles.map(f => `<li>${f.name}</li>`).join('')}</ul>`;
                 paramsSection.classList.remove('hidden');
-                resultsSection.classList.add('hidden'); // Ergebnisse bei neuer Auswahl ausblenden
+                resultsSection.classList.add('hidden');
             } else {
                 fileListDiv.innerHTML = '';
                 paramsSection.classList.add('hidden');
             }
+        }
+
+        // KORREKTUR: Diese Funktion wird wieder im Haupt-Thread ausgeführt.
+        async function decodeAndStandardizeAudio(file) {
+            const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_CONFIG.SAMPLE_RATE });
+            const arrayBuffer = await file.arrayBuffer();
+            const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+            
+            if (audioBuffer.sampleRate === AUDIO_CONFIG.SAMPLE_RATE && audioBuffer.numberOfChannels === 1) {
+                return audioBuffer.getChannelData(0);
+            }
+            // Resample und Downmix falls nötig
+            const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * AUDIO_CONFIG.SAMPLE_RATE, AUDIO_CONFIG.SAMPLE_RATE);
+            const source = offlineCtx.createBufferSource();
+            source.buffer = audioBuffer;
+            source.connect(offlineCtx.destination);
+            source.start(0);
+            const renderedBuffer = await offlineCtx.startRendering();
+            return renderedBuffer.getChannelData(0);
         }
 
         async function runAnalysis() {
@@ -363,7 +355,6 @@
                 return;
             }
 
-            // UI für Analyse vorbereiten
             startBtn.disabled = true;
             startBtn.classList.add('opacity-50', 'cursor-not-allowed');
             analysisProgress.classList.remove('hidden');
@@ -373,28 +364,19 @@
             progressText.textContent = 'Initialisiere Analyse...';
             progressBar.style.width = '0%';
 
-            // ====================================================================
-            // KORREKTUR: Absoluten Pfad zum Modell erstellen.
-            // Der Worker kennt den relativen Pfad nicht, da er aus einem Blob geladen wird.
-            // new URL() kombiniert die Basis-URL der Seite mit dem relativen Pfad zum Modell.
             const absoluteModelPath = new URL(MODEL_PATH, window.location.href).href;
-            // ====================================================================
-
             const allEvents = [];
             let filesProcessed = 0;
-            const originalFileCount = uploadedFiles.length; // Gesamtzahl für Fortschrittsanzeige speichern
-            let filesToProcess = [...uploadedFiles]; // Kopie der Dateien für die Verarbeitung
+            const originalFileCount = uploadedFiles.length;
+            let filesToProcess = [...uploadedFiles];
 
-            // Worker-Blob erstellen
             const workerScript = document.getElementById('analysis-worker').textContent;
             const workerBlob = new Blob([workerScript], { type: 'application/javascript' });
             const workerUrl = URL.createObjectURL(workerBlob);
-            
-            // Worker erstellen
             const worker = new Worker(workerUrl);
 
-            // Handler für Nachrichten vom Worker
-            worker.onmessage = (e) => {
+            // KORREKTUR: Die onmessage-Logik wird async, um auf das Dekodieren der nächsten Datei zu warten.
+            worker.onmessage = async (e) => {
                 const { type, message, events, fileName } = e.data;
 
                 if (type === 'progress') {
@@ -405,22 +387,21 @@
                     progressText.textContent = `Analyse abgeschlossen für: ${fileName}`;
                     progressBar.style.width = `${(filesProcessed / originalFileCount) * 100}%`;
 
-                    // Nächste Datei senden oder Analyse beenden
                     if (filesToProcess.length > 0) {
                         const nextFile = filesToProcess.shift();
-                        sendToWorker(nextFile);
+                        await sendToWorker(nextFile); // Warten bis die nächste Datei vorbereitet ist
                     } else {
                         worker.terminate();
                         finalizeAnalysis();
                     }
                 } else if (type === 'error') {
                     console.error("Worker Error:", message);
-                    alert(message); // Zeige den Fehler dem Nutzer an
-                    filesProcessed++; // Zählen, um die Schleife zu beenden
+                    alert(message);
+                    filesProcessed++;
                     progressBar.style.width = `${(filesProcessed / originalFileCount) * 100}%`;
                     if (filesToProcess.length > 0) {
                          const nextFile = filesToProcess.shift();
-                         sendToWorker(nextFile);
+                         await sendToWorker(nextFile);
                     } else {
                         worker.terminate();
                         finalizeAnalysis();
@@ -431,20 +412,35 @@
             worker.onerror = (e) => {
                 console.error(`Ein Fehler ist im Worker aufgetreten: ${e.message}`);
                 progressText.textContent = `Ein kritischer Fehler ist aufgetreten: ${e.message}`;
-                finalizeAnalysis(true); // Analyse mit Fehler beenden
+                finalizeAnalysis(true);
                 worker.terminate();
             };
-
-            const sendToWorker = (file) => {
-                const params = {
-                    // KORREKTUR: Sende den absoluten Pfad an den Worker
-                    modelPath: absoluteModelPath,
-                    audioConfig: AUDIO_CONFIG,
-                    overlapPercent: parseInt(overlapSlider.value),
-                    shouldMerge: mergeCheckbox.checked,
-                    threshold: 0.5
-                };
-                worker.postMessage({ file, params });
+            
+            // KORREKTUR: Diese Funktion dekodiert die Datei und sendet die Rohdaten.
+            const sendToWorker = async (file) => {
+                try {
+                    progressText.textContent = `Dekodiere: ${file.name}...`;
+                    const audioData = await decodeAndStandardizeAudio(file);
+                    const params = {
+                        modelPath: absoluteModelPath,
+                        audioConfig: AUDIO_CONFIG,
+                        overlapPercent: parseInt(overlapSlider.value),
+                        shouldMerge: mergeCheckbox.checked,
+                        threshold: 0.5
+                    };
+                    // Sende die rohen Audio-Daten als "Transferable Object" für maximale Effizienz
+                    worker.postMessage({ audioData, fileName: file.name, params }, [audioData.buffer]);
+                } catch (err) {
+                    alert(`Fehler beim Dekodieren von ${file.name}: ${err.message}`);
+                    // Verarbeite die nächste Datei, auch wenn eine fehlschlägt
+                    if (filesToProcess.length > 0) {
+                        const nextFile = filesToProcess.shift();
+                        await sendToWorker(nextFile);
+                    } else {
+                        worker.terminate();
+                        finalizeAnalysis();
+                    }
+                }
             };
 
             const finalizeAnalysis = (hadError = false) => {
@@ -452,7 +448,6 @@
                     progressText.textContent = 'Analyse für alle Dateien abgeschlossen!';
                     displayResults(allEvents);
                  }
-                
                  startBtn.disabled = false;
                  startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
                  setTimeout(() => {
@@ -461,14 +456,14 @@
                  }, 2000);
             };
 
-            // Erste Datei zur Verarbeitung an den Worker senden
+            // Starte die Verarbeitung der ersten Datei
             const firstFile = filesToProcess.shift();
-            sendToWorker(firstFile);
+            await sendToWorker(firstFile);
         }
 
         // --- Ergebnisdarstellung (unverändert) ---
-
-        function createWavBlob(samples, sampleRate) {
+        // (Der Rest des Skripts bleibt gleich)
+        function createWavBlob(samples, sampleRate) { /* ... unverändert ... */ 
             const buffer = new ArrayBuffer(44 + samples.length * 2);
             const view = new DataView(buffer);
 
@@ -500,14 +495,12 @@
 
             return new Blob([view], { type: 'audio/wav' });
         }
-        
-        function drawSpectrogramFromAudio(audioClip, canvas) {
+        function drawSpectrogramFromAudio(audioClip, canvas) { /* ... unverändert ... */ 
              const specTensorForViz = audioToMelspectrogramForViz(audioClip);
              drawSpectrogram(specTensorForViz, canvas);
              tf.dispose(specTensorForViz);
         }
-
-        function audioToMelspectrogramForViz(y) {
+        function audioToMelspectrogramForViz(y) { /* ... unverändert ... */ 
             if (y.length > AUDIO_CONFIG.TARGET_SAMPLES) {
                 y = y.slice(0, AUDIO_CONFIG.TARGET_SAMPLES);
             } else if (y.length < AUDIO_CONFIG.TARGET_SAMPLES) {
@@ -525,8 +518,7 @@
                 return logMelSpectrogram.expandDims(-1);
              });
         }
-        
-        function createMelFilterbankForViz(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
+        function createMelFilterbankForViz(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) { /* ... unverändert ... */ 
             const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
             const melToHz = (mel) => 700.0 * (Math.exp(mel / 1127.0) - 1.0);
             const lowerMel = hzToMel(lowerEdgeHz);
@@ -551,8 +543,7 @@
             }
             return melWeights.toTensor();
         }
-
-        function displayResults(events) {
+        function displayResults(events) { /* ... unverändert ... */ 
             resultsSection.classList.remove('hidden');
             resultsTitle.textContent = `2. Ergebnisse: ${events.length} Uhu-Rufe gefunden`;
 
@@ -599,8 +590,7 @@
                 drawSpectrogramFromAudio(event.audioClip, specCanvas);
             });
         }
-
-        function drawSpectrogram(spec3D, canvas) {
+        function drawSpectrogram(spec3D, canvas) { /* ... unverändert ... */ 
             tf.tidy(() => {
                 const spec2D = spec3D.squeeze();
                 const specTransposed = spec2D.transpose();
