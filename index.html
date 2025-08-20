@@ -291,7 +291,7 @@
     
     <script type="module">
         // --- Globale Konfiguration ---
-        const MODEL_PATH = './uhu_model_js/model.json';
+        const MODEL_PATH = './uhu_model_js/model.json'; // Dies bleibt ein relativer Pfad
         const MAX_CLIPS_TO_SHOW = 20;
 
         const AUDIO_CONFIG = {
@@ -373,8 +373,17 @@
             progressText.textContent = 'Initialisiere Analyse...';
             progressBar.style.width = '0%';
 
+            // ====================================================================
+            // KORREKTUR: Absoluten Pfad zum Modell erstellen.
+            // Der Worker kennt den relativen Pfad nicht, da er aus einem Blob geladen wird.
+            // new URL() kombiniert die Basis-URL der Seite mit dem relativen Pfad zum Modell.
+            const absoluteModelPath = new URL(MODEL_PATH, window.location.href).href;
+            // ====================================================================
+
             const allEvents = [];
             let filesProcessed = 0;
+            const originalFileCount = uploadedFiles.length; // Gesamtzahl für Fortschrittsanzeige speichern
+            let filesToProcess = [...uploadedFiles]; // Kopie der Dateien für die Verarbeitung
 
             // Worker-Blob erstellen
             const workerScript = document.getElementById('analysis-worker').textContent;
@@ -386,19 +395,19 @@
 
             // Handler für Nachrichten vom Worker
             worker.onmessage = (e) => {
-                const { type, message, events, error } = e.data;
+                const { type, message, events, fileName } = e.data;
 
                 if (type === 'progress') {
                     progressText.textContent = message;
                 } else if (type === 'result') {
                     allEvents.push(...events);
                     filesProcessed++;
-                    progressText.textContent = `Analyse abgeschlossen für: ${e.data.fileName}`;
-                    progressBar.style.width = `${(filesProcessed / uploadedFiles.length) * 100}%`;
+                    progressText.textContent = `Analyse abgeschlossen für: ${fileName}`;
+                    progressBar.style.width = `${(filesProcessed / originalFileCount) * 100}%`;
 
                     // Nächste Datei senden oder Analyse beenden
-                    if (uploadedFiles.length > 0) {
-                        const nextFile = uploadedFiles.shift();
+                    if (filesToProcess.length > 0) {
+                        const nextFile = filesToProcess.shift();
                         sendToWorker(nextFile);
                     } else {
                         worker.terminate();
@@ -406,9 +415,11 @@
                     }
                 } else if (type === 'error') {
                     console.error("Worker Error:", message);
+                    alert(message); // Zeige den Fehler dem Nutzer an
                     filesProcessed++; // Zählen, um die Schleife zu beenden
-                    if (uploadedFiles.length > 0) {
-                         const nextFile = uploadedFiles.shift();
+                    progressBar.style.width = `${(filesProcessed / originalFileCount) * 100}%`;
+                    if (filesToProcess.length > 0) {
+                         const nextFile = filesToProcess.shift();
                          sendToWorker(nextFile);
                     } else {
                         worker.terminate();
@@ -426,7 +437,8 @@
 
             const sendToWorker = (file) => {
                 const params = {
-                    modelPath: MODEL_PATH,
+                    // KORREKTUR: Sende den absoluten Pfad an den Worker
+                    modelPath: absoluteModelPath,
                     audioConfig: AUDIO_CONFIG,
                     overlapPercent: parseInt(overlapSlider.value),
                     shouldMerge: mergeCheckbox.checked,
@@ -450,7 +462,7 @@
             };
 
             // Erste Datei zur Verarbeitung an den Worker senden
-            const firstFile = uploadedFiles.shift();
+            const firstFile = filesToProcess.shift();
             sendToWorker(firstFile);
         }
 
@@ -489,16 +501,13 @@
             return new Blob([view], { type: 'audio/wav' });
         }
         
-        // Temporäre Funktion zum Zeichnen des Spektrogramms, da die Originalfunktion nicht mehr direkt auf die Verarbeitung zugreifen kann
         function drawSpectrogramFromAudio(audioClip, canvas) {
              const specTensorForViz = audioToMelspectrogramForViz(audioClip);
              drawSpectrogram(specTensorForViz, canvas);
              tf.dispose(specTensorForViz);
         }
 
-        // Diese Funktion wird nur noch für die Visualisierung benötigt und kann im Hauptthread bleiben.
         function audioToMelspectrogramForViz(y) {
-             // Diese Funktion ist eine Kopie der Worker-Funktion, aber verwendet die globale AUDIO_CONFIG
             if (y.length > AUDIO_CONFIG.TARGET_SAMPLES) {
                 y = y.slice(0, AUDIO_CONFIG.TARGET_SAMPLES);
             } else if (y.length < AUDIO_CONFIG.TARGET_SAMPLES) {
@@ -518,7 +527,6 @@
         }
         
         function createMelFilterbankForViz(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
-            // Kopie der Worker-Funktion
             const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
             const melToHz = (mel) => 700.0 * (Math.exp(mel / 1127.0) - 1.0);
             const lowerMel = hzToMel(lowerEdgeHz);
@@ -588,18 +596,17 @@
                 
                 resultsGrid.appendChild(card);
                 
-                // Erstelle Spektrogramm nur für die Visualisierung
                 drawSpectrogramFromAudio(event.audioClip, specCanvas);
             });
         }
 
         function drawSpectrogram(spec3D, canvas) {
             tf.tidy(() => {
-                const spec2D = spec3D.squeeze(); // Entferne die Kanal-Dimension
-                const specTransposed = spec2D.transpose(); // Transponieren für die Darstellung [mels, time]
+                const spec2D = spec3D.squeeze();
+                const specTransposed = spec2D.transpose();
 
                 const ctx = canvas.getContext('2d');
-                const [height, width] = specTransposed.shape; // Höhe = N_MELS, Breite = Zeit
+                const [height, width] = specTransposed.shape;
                 const canvasWidth = canvas.width;
                 const canvasHeight = canvas.height;
                 
@@ -643,7 +650,6 @@
                 }
             });
         }
-
     </script>
 </body>
 </html>
