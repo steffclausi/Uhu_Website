@@ -1,8 +1,7 @@
 // Wichtig: TensorFlow.js im Worker-Kontext importieren
 importScripts('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js');
 // NEU: Eine Bibliothek importieren, die Audio im Worker dekodieren kann
-importScripts('https://cdn.jsdelivr.net/npm/decode-audio-data-fast/dist/decode-audio-data-fast.min.js');
-
+importScripts('./decode-audio-data-fast.min.js');
 
 // Globale Konfiguration & Vorverarbeitungsfunktionen (hierher verschoben)
 let model = null;
