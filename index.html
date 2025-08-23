@@ -124,19 +124,19 @@
     </div>
 
     <script type="module">
-        // --- Globale Konfiguration (aus Node.js-Trainingsskript übernommen) ---
-        const MODEL_PATH = './uhu_model_js/model.json'; // WICHTIG: Pfad zur konvertierten model.json
-        const MAX_CLIPS_TO_SHOW = 20;
+        // --- Globale Konfiguration ---
+        const MODEL_PATH = './uhu_model_js/model.json';
+        const MAX_CLIPS_TO_SHOW_PER_CATEGORY = 20;
 
         const AUDIO_CONFIG = {
-            SAMPLE_RATE: 16000,      // Abtastrate in Hz
-            DURATION: 3,             // Zieldauer der Clips in Sekunden
-            N_MELS: 64,              // Anzahl der Mel-Frequenzbänder
-            N_FFT: 1024,             // Fenstergröße für die FFT
-            HOP_LENGTH: 512,         // Schrittweite für die FFT
+            SAMPLE_RATE: 16000,
+            DURATION: 3,
+            N_MELS: 64,
+            N_FFT: 1024,
+            HOP_LENGTH: 512,
             TARGET_SAMPLES: 16000 * 3,
-            MIN_FREQ: 200,           // Untere Grenzfrequenz in Hz
-            MAX_FREQ: 5000,          // Obere Grenzfrequenz in Hz
+            MIN_FREQ: 200,
+            MAX_FREQ: 5000,
         };
 
         // --- UI-Elemente ---
@@ -197,44 +197,28 @@
             }
         }
         
-        // ========================================================================
-        // VORVERARBEITUNG (aus Node.js-Skript portiert)
-        // ========================================================================
-
-        /**
-         * Erstellt eine Mel-Filterbank-Matrix. Diese Funktion ist eine exakte
-         * Portierung der Implementierung aus dem Trainingsskript.
-         */
+        // --- Audio-Vorverarbeitung ---
         function createMelFilterbank(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
-            // Umrechnungsformeln zwischen Hz und Mel
             const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
             const melToHz = (mel) => 700.0 * (Math.exp(mel / 1127.0) - 1.0);
-
             const lowerMel = hzToMel(lowerEdgeHz);
             const upperMel = hzToMel(upperEdgeHz);
-            
-            // Die Mel-Punkte werden linear im Mel-Raum verteilt.
             const melPoints = tf.linspace(lowerMel, upperMel, numMelBins + 2).arraySync();
             const hzPoints = melPoints.map(melToHz);
-            
             const spectrogramBinHz = sampleRate / 2.0 / (numSpectrogramBins - 1);
             const spectrogramBinEdges = Array.from({ length: numSpectrogramBins }, (_, i) => i * spectrogramBinHz);
-
             const melWeights = tf.buffer([numSpectrogramBins, numMelBins]);
             for (let i = 0; i < numMelBins; i++) {
                 const leftEdge = hzPoints[i];
                 const center = hzPoints[i + 1];
                 const rightEdge = hzPoints[i + 2];
-
                 for (let j = 0; j < numSpectrogramBins; j++) {
                     const specHz = spectrogramBinEdges[j];
                     let weight = 0.0;
                     if (specHz >= leftEdge && specHz <= center) {
-                        // Der Anstieg ist linear von 0 (am linken Rand) bis 1 (im Zentrum).
                         const denominator = center - leftEdge;
                         if (denominator > 0) weight = (specHz - leftEdge) / denominator;
                     } else if (specHz > center && specHz <= rightEdge) {
-                        // Der Abfall ist linear von 1 (im Zentrum) bis 0 (am rechten Rand).
                         const denominator = rightEdge - center;
                         if (denominator > 0) weight = (rightEdge - specHz) / denominator;
                     }
@@ -244,14 +228,7 @@
             return melWeights.toTensor();
         }
 
-        /**
-         * Konvertiert einen rohen Audio-Clip in ein Mel-Spektrogramm.
-         * Diese Pipeline entspricht exakt dem Node.js-Trainingsskript.
-         * @param {Float32Array} y Ein roher Mono-Audio-Clip.
-         * @returns {tf.Tensor} Das Mel-Spektrogramm als Tensor.
-         */
         function audioToMelspectrogram(y) {
-            // Normalisiere die Länge: Padde oder schneide ab
             if (y.length > AUDIO_CONFIG.TARGET_SAMPLES) {
                 y = y.slice(0, AUDIO_CONFIG.TARGET_SAMPLES);
             } else if (y.length < AUDIO_CONFIG.TARGET_SAMPLES) {
@@ -261,19 +238,12 @@
                 newY.set(padding, y.length);
                 y = newY;
             }
-
-            // tf.tidy sorgt für automatisches Aufräumen von Tensoren
             return tf.tidy(() => {
                 const inputTensor = tf.tensor1d(y);
-
-                // 1. STFT (Short-Time Fourier Transform)
                 const stft = tf.signal.stft(inputTensor, AUDIO_CONFIG.N_FFT, AUDIO_CONFIG.HOP_LENGTH);
-
-                // 2. Bandpass-Filter im Frequenzbereich anwenden
                 const freqBinCount = AUDIO_CONFIG.N_FFT / 2 + 1;
                 const minBin = Math.round(AUDIO_CONFIG.MIN_FREQ * AUDIO_CONFIG.N_FFT / AUDIO_CONFIG.SAMPLE_RATE);
                 const maxBin = Math.round(AUDIO_CONFIG.MAX_FREQ * AUDIO_CONFIG.N_FFT / AUDIO_CONFIG.SAMPLE_RATE);
-
                 const bandpassMaskValues = new Float32Array(freqBinCount);
                 for (let i = 0; i < freqBinCount; i++) {
                     if (i >= minBin && i <= maxBin) {
@@ -284,37 +254,21 @@
                 }
                 const bandpassMask = tf.tensor1d(bandpassMaskValues);
                 const filteredStft = stft.mul(bandpassMask);
-
-                // 3. Mel-Spektrogramm erstellen
                 const powerSpectrogram = tf.square(tf.abs(filteredStft));
-                
                 const melMatrix = createMelFilterbank(
                     AUDIO_CONFIG.N_MELS, freqBinCount, AUDIO_CONFIG.SAMPLE_RATE, 0, AUDIO_CONFIG.SAMPLE_RATE / 2
                 );
-
                 const melSpectrogram = tf.matMul(powerSpectrogram, melMatrix);
-
-                // 4. Konvertiere zu logarithmischer Skala (wie im Training)
-                const logMelSpectrogram = tf.log(melSpectrogram.add(1e-6)); // Epsilon für numerische Stabilität
-
-                // WICHTIG: Das Modell erwartet die Form [Zeit, Mels, Kanal].
-                // Wir expandieren die letzte Dimension für den "Kanal".
+                const logMelSpectrogram = tf.log(melSpectrogram.add(1e-6));
                 return logMelSpectrogram.expandDims(-1);
             });
         }
         
-        // ========================================================================
-        // HAUPTFUNKTIONEN
-        // ========================================================================
-
+        // --- Hauptfunktionen ---
         async function decodeAndStandardizeAudio(file) {
-            // Erstelle einen AudioContext mit der Ziel-Abtastrate
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_CONFIG.SAMPLE_RATE });
             const arrayBuffer = await file.arrayBuffer();
             const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
-            
-            // Resampling wird hier durch den AudioContext erledigt.
-            // Sicherstellen, dass die Ausgabe Mono ist
             if (audioBuffer.numberOfChannels > 1) {
                 const offlineCtx = new OfflineAudioContext(1, audioBuffer.duration * AUDIO_CONFIG.SAMPLE_RATE, AUDIO_CONFIG.SAMPLE_RATE);
                 const source = offlineCtx.createBufferSource();
@@ -324,8 +278,7 @@
                 const renderedBuffer = await offlineCtx.startRendering();
                 return renderedBuffer.getChannelData(0);
             }
-            
-            return audioBuffer.getChannelData(0); // Bereits Mono und resampled
+            return audioBuffer.getChannelData(0);
         }
         
         function mergeEvents(candidates) {
@@ -363,8 +316,7 @@
                     progressText.textContent = 'Lade Erkennungsmodell...';
                     try {
                         model = await tf.loadLayersModel(MODEL_PATH);
-                        // "Warm-up" des Modells
-                        const specShape = model.inputs[0].shape.slice(1); // [time, mels, channel]
+                        const specShape = model.inputs[0].shape.slice(1);
                         const dummyInput = tf.zeros([1, ...specShape]);
                         model.predict(dummyInput).dispose();
                         dummyInput.dispose();
@@ -375,43 +327,32 @@
                     }
                 }
 
-                const threshold = 0.5; // Fester Schwellenwert
+                const threshold = 0.5;
                 const overlapPercent = parseInt(overlapSlider.value);
                 const shouldMerge = mergeCheckbox.checked;
                 const strideSec = AUDIO_CONFIG.DURATION * (1 - overlapPercent / 100.0);
                 const strideSamples = Math.round(strideSec * AUDIO_CONFIG.SAMPLE_RATE);
 
                 let allEvents = [];
-
                 for (let i = 0; i < uploadedFiles.length; i++) {
                     const file = uploadedFiles[i];
                     progressText.textContent = `Analysiere: ${file.name} (${i+1}/${uploadedFiles.length})`;
-                    
                     try {
                         const y = await decodeAndStandardizeAudio(file);
                         const specs = [];
                         const starts = [];
-                        
-                        // Sliding window über die Audiodatei
                         for (let start = 0; start + AUDIO_CONFIG.TARGET_SAMPLES <= y.length; start += strideSamples) {
-                            const end = start + AUDIO_CONFIG.TARGET_SAMPLES;
-                            let clip = y.slice(start, end);
-
-                            const spec = audioToMelspectrogram(clip);
-                            specs.push(spec);
+                            const clip = y.slice(start, start + AUDIO_CONFIG.TARGET_SAMPLES);
+                            specs.push(audioToMelspectrogram(clip));
                             starts.push(start);
                         }
-
-                        // Update progress bar after preprocessing one file
                         progressBar.style.width = `${((i + 0.5) / uploadedFiles.length) * 100}%`;
 
                         if (specs.length > 0) {
-                            const X = tf.stack(specs); // Ergibt [batch, time, mels, channel]
+                            const X = tf.stack(specs);
                             const probs = await model.predict(X).data();
-                            
-                            tf.dispose(X); // Wichtig: Speicher freigeben
+                            tf.dispose(X);
                             tf.dispose(specs);
-
                             let candidates = [];
                             for (let j = 0; j < probs.length; j++) {
                                 if (probs[j] >= threshold) {
@@ -424,7 +365,6 @@
                                     });
                                 }
                             }
-                            
                             const fileEvents = shouldMerge ? mergeEvents(candidates) : candidates;
                             allEvents.push(...fileEvents);
                         }
@@ -452,82 +392,62 @@
         }
 
         // --- Ergebnisdarstellung ---
-
         function createWavBlob(samples, sampleRate) {
             const buffer = new ArrayBuffer(44 + samples.length * 2);
             const view = new DataView(buffer);
-
             const writeString = (view, offset, string) => {
                 for (let i = 0; i < string.length; i++) {
                     view.setUint8(offset + i, string.charCodeAt(i));
                 }
             };
-
             writeString(view, 0, 'RIFF');
             view.setUint32(4, 36 + samples.length * 2, true);
             writeString(view, 8, 'WAVE');
             writeString(view, 12, 'fmt ');
             view.setUint32(16, 16, true);
-            view.setUint16(20, 1, true); // Mono
-            view.setUint16(22, 1, true); // 1 Channel
+            view.setUint16(20, 1, true);
+            view.setUint16(22, 1, true);
             view.setUint32(24, sampleRate, true);
-            view.setUint32(28, sampleRate * 2, true); // Byte Rate
-            view.setUint16(32, 2, true); // Block Align
-            view.setUint16(34, 16, true); // Bits per Sample
+            view.setUint32(28, sampleRate * 2, true);
+            view.setUint16(32, 2, true);
+            view.setUint16(34, 16, true);
             writeString(view, 36, 'data');
             view.setUint32(40, samples.length * 2, true);
-
             let offset = 44;
             for (let i = 0; i < samples.length; i++, offset += 2) {
                 const s = Math.max(-1, Math.min(1, samples[i]));
                 view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
             }
-
             return new Blob([view], { type: 'audio/wav' });
         }
 
-        /**
-         * Erstellt eine einzelne Ergebnis-Karte für die Anzeige.
-         * @param {object} event - Das Erkennungs-Event.
-         * @returns {HTMLElement} Das fertige card-Element.
-         */
         function createResultCard(event) {
             const card = document.createElement('div');
             card.className = 'bg-gray-50 p-4 rounded-lg shadow';
-
             const specCanvas = document.createElement('canvas');
             specCanvas.width = 200;
             specCanvas.height = 128;
-
             const audio = new Audio();
             const blob = createWavBlob(event.audioClip, AUDIO_CONFIG.SAMPLE_RATE);
             audio.src = URL.createObjectURL(blob);
             audio.controls = true;
             audio.className = 'w-full mt-2';
-
             card.innerHTML = `
                 <p class="text-sm font-medium truncate" title="${event.file}">${event.file}</p>
                 <p class="text-xs text-indigo-600 font-bold">Wahrscheinlichkeit: ${(event.prob * 100).toFixed(1)}%</p>
             `;
             card.appendChild(specCanvas);
             card.appendChild(audio);
-
-            // Erstelle Spektrogramm nur für die Visualisierung
             const specTensorForViz = audioToMelspectrogram(event.audioClip);
             drawSpectrogram(specTensorForViz, specCanvas);
             tf.dispose(specTensorForViz);
-
             return card;
         }
 
-        /**
-         * Stellt die Ergebnisse in zwei Kategorien dar.
-         * @param {Array} events - Eine Liste aller gefundenen Events.
-         */
         function displayResults(events) {
             resultsSection.classList.remove('hidden');
-            resultsGrid.innerHTML = ''; // Vorherige Ergebnisse löschen
-            resultsSummary.innerHTML = ''; // Summary ebenfalls leeren
+            resultsGrid.innerHTML = '';
+            resultsSummary.innerHTML = '';
             resultsTitle.textContent = `2. Ergebnisse: ${events.length} mögliche Uhu-Rufe gefunden`;
 
             if (events.length === 0) {
@@ -535,7 +455,6 @@
                 return;
             }
 
-            // Events in zwei Kategorien filtern und sortieren
             const highConfidenceEvents = events
                 .filter(e => e.prob >= 0.98)
                 .sort((a, b) => b.prob - a.prob);
@@ -544,29 +463,23 @@
                 .filter(e => e.prob >= 0.5 && e.prob < 0.98)
                 .sort((a, b) => b.prob - a.prob);
 
-            // Kategorie 1: Hohe Wahrscheinlichkeit
             if (highConfidenceEvents.length > 0) {
                 const title = document.createElement('h3');
                 title.className = 'col-span-full text-xl font-bold text-gray-800 mt-6 mb-2 text-green-700';
-                title.textContent = `✅ Uhu erkannt mit hoher Wahrscheinlichkeit (${highConfidenceEvents.length} Clips)`;
+                title.textContent = `✅ Uhu erkannt mit hoher Wahrscheinlichkeit (Top ${highConfidenceEvents.slice(0, MAX_CLIPS_TO_SHOW_PER_CATEGORY).length})`;
                 resultsGrid.appendChild(title);
-
-                const clipsToShow = highConfidenceEvents.slice(0, MAX_CLIPS_TO_SHOW);
+                const clipsToShow = highConfidenceEvents.slice(0, MAX_CLIPS_TO_SHOW_PER_CATEGORY);
                 clipsToShow.forEach(event => {
                     resultsGrid.appendChild(createResultCard(event));
                 });
             }
 
-            // Kategorie 2: Mittlere Wahrscheinlichkeit
             if (mediumConfidenceEvents.length > 0) {
                 const title = document.createElement('h3');
                 title.className = 'col-span-full text-xl font-bold text-gray-800 mt-8 mb-2 text-yellow-700';
-                title.textContent = `🤔 Potentiell Uhu erkannt, bitte prüfen (${mediumConfidenceEvents.length} Clips)`;
+                title.textContent = `🤔 Potentiell Uhu erkannt, bitte prüfen (Top ${mediumConfidenceEvents.slice(0, MAX_CLIPS_TO_SHOW_PER_CATEGORY).length})`;
                 resultsGrid.appendChild(title);
-
-                // Berechne, wie viele Plätze noch frei sind, falls MAX_CLIPS_TO_SHOW gilt
-                const remainingSlots = MAX_CLIPS_TO_SHOW - highConfidenceEvents.length;
-                const clipsToShow = mediumConfidenceEvents.slice(0, Math.max(0, remainingSlots));
+                const clipsToShow = mediumConfidenceEvents.slice(0, MAX_CLIPS_TO_SHOW_PER_CATEGORY);
                 clipsToShow.forEach(event => {
                     resultsGrid.appendChild(createResultCard(event));
                 });
@@ -577,14 +490,11 @@
             tf.tidy(() => {
                 const spec2D = spec3D.squeeze();
                 const specTransposed = spec2D.transpose();
-
-                const ctx = canvas.getContext('d');
+                const ctx = canvas.getContext('2d');
                 const [height, width] = specTransposed.shape;
                 const canvasWidth = canvas.width;
                 const canvasHeight = canvas.height;
-                
                 const specArray = specTransposed.arraySync();
-                
                 let minVal = Infinity, maxVal = -Infinity;
                 for(let i=0; i<height; i++) {
                     for(let j=0; j<width; j++) {
@@ -593,15 +503,12 @@
                     }
                 }
                 const range = maxVal - minVal;
-
                 const colWidth = canvasWidth / width;
                 const rowHeight = canvasHeight / height;
-
                 const viridis = [
                     [68, 1, 84], [72, 40, 120], [62, 74, 137], [49, 104, 142], [38, 130, 142],
                     [31, 158, 137], [53, 183, 121], [109, 205, 89], [180, 222, 44], [253, 231, 37]
                 ];
-
                 const getColor = (value) => {
                     const i = Math.min(Math.max(Math.floor(value * (viridis.length - 1)), 0), viridis.length - 2);
                     const t = value * (viridis.length - 1) - i;
@@ -610,21 +517,17 @@
                     const b = Math.floor(viridis[i][2] + t * (viridis[i+1][2] - viridis[i][2]));
                     return `rgb(${r},${g},${b})`;
                 };
-                
                 ctx.clearRect(0, 0, canvasWidth, canvasHeight);
-
                 for (let x = 0; x < width; x++) {
                     for (let y = 0; y < height; y++) {
                         const value = specArray[y][x];
                         const normalized = (value - minVal) / range;
                         ctx.fillStyle = getColor(normalized);
-                        // Y-Achse umkehren, damit niedrige Frequenzen unten sind
                         ctx.fillRect(x * colWidth, canvasHeight - (y + 1) * rowHeight, colWidth, rowHeight);
                     }
                 }
             });
         }
-
     </script>
 </body>
 </html>
