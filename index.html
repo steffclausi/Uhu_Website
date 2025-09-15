@@ -98,6 +98,13 @@
                         </div>
                     </details>
                 </div>
+
+                <div id="prognosis-section" class="hidden mt-6 bg-blue-50 p-4 rounded-lg text-center">
+                    <p class="text-sm text-blue-700">
+                        Geschätzte Gesamtdauer der Analyse: <strong id="prognosis-time">...</strong><br>
+                        <span class="text-xs">(Basierend auf einer angenommenen Geschwindigkeit von <span id="prognosis-speed"></span>)</span>
+                    </p>
+                </div>
                 
                 <div class="mt-8 text-center">
                     <button id="start-analysis-btn" class="bg-indigo-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-indigo-700 transition-colors duration-300 text-lg shadow-md">
@@ -110,8 +117,9 @@
                  <div class="loader mx-auto"></div>
                  <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
                  <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
-                       <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                         <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
                  </div>
+                 <p id="time-stats" class="mt-2 text-sm text-gray-500"></p>
             </div>
 
             <div id="results-section" class="hidden mt-10">
@@ -125,6 +133,10 @@
 
     <script type="module">
         // --- Globale Konfiguration ---
+        // NEU: Anpassbarer Wert für die anfängliche Geschwindigkeitsschätzung.
+        // Schätzt, wie viele Minuten Audio pro Stunde verarbeitet werden (z.B. 60 = ca. Echtzeit).
+        const ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR = 60; 
+
         const MODEL_PATH = './uhu_model_js/model.json';
         const MAX_CLIPS_TO_SHOW_PER_CATEGORY = 20;
 
@@ -154,8 +166,15 @@
         const resultsTitle = document.getElementById('results-title');
         const resultsSummary = document.getElementById('results-summary');
         const resultsGrid = document.getElementById('results-grid');
+        
+        // NEU: Zusätzliche UI-Elemente für die Zeitanzeige
+        const prognosisSection = document.getElementById('prognosis-section');
+        const prognosisTime = document.getElementById('prognosis-time');
+        const prognosisSpeed = document.getElementById('prognosis-speed');
+        const timeStats = document.getElementById('time-stats');
 
         let uploadedFiles = [];
+        let fileDurations = []; // NEU: Speicher für die Dauer der einzelnen Dateien
         let model = null;
 
         // --- Event Listeners ---
@@ -186,18 +205,86 @@
         });
         startBtn.addEventListener('click', runAnalysis);
 
-        function handleFiles(files) {
+        // --- NEUE Hilfsfunktionen für Zeitberechnung und -formatierung ---
+        function getAudioDuration(file) {
+            return new Promise((resolve, reject) => {
+                const audio = document.createElement('audio');
+                audio.preload = 'metadata';
+                audio.onloadedmetadata = () => {
+                    URL.revokeObjectURL(audio.src);
+                    resolve(audio.duration);
+                };
+                audio.onerror = () => {
+                    URL.revokeObjectURL(audio.src);
+                    reject(`Konnte Dauer für Datei ${file.name} nicht lesen.`);
+                };
+                audio.src = URL.createObjectURL(file);
+            });
+        }
+        
+        function formatTime(totalSeconds) {
+            if (isNaN(totalSeconds) || totalSeconds < 0) return 'wird berechnet...';
+            if (totalSeconds < 1) return "weniger als eine Sekunde";
+            if (totalSeconds < 60) return `ca. ${Math.round(totalSeconds)} Sekunden`;
+            if (totalSeconds < 3600) return `ca. ${Math.round(totalSeconds / 60)} Minuten`;
+
+            const hours = Math.floor(totalSeconds / 3600);
+            const minutes = Math.round((totalSeconds % 3600) / 60);
+
+            if (minutes === 0) return `ca. ${hours} Stunde${hours > 1 ? 'n' : ''}`;
+            if (minutes === 60) return `ca. ${hours + 1} Stunde${hours + 1 > 1 ? 'n' : ''}`;
+            return `ca. ${hours} Stunde${hours > 1 ? 'n' : ''} und ${minutes} Minuten`;
+        }
+        
+        function formatRemainingTime(seconds) {
+            if (isNaN(seconds) || seconds < 0 || seconds === Infinity) return 'Verbleibend: berechne...';
+            if (seconds < 2) return 'Verbleibend: fast fertig...';
+            
+            const h = Math.floor(seconds / 3600);
+            const m = Math.floor((seconds % 3600) / 60);
+            const s = Math.floor(seconds % 60);
+            
+            if (h > 0) return `Verbleibend: ~${h} Std. ${m} Min.`;
+            if (m > 0) return `Verbleibend: ~${m} Min. ${s} Sek.`;
+            return `Verbleibend: ~${s} Sek.`;
+        }
+
+        // --- GEÄNDERTE Funktion zur Dateiverarbeitung mit Prognose ---
+        async function handleFiles(files) {
             uploadedFiles = Array.from(files);
+            
+            prognosisSection.classList.add('hidden');
+            paramsSection.classList.add('hidden');
+
             if (uploadedFiles.length > 0) {
                 fileListDiv.innerHTML = `<h3 class="font-medium text-gray-700">Ausgewählte Dateien:</h3><ul class="list-disc list-inside text-sm text-gray-600">${uploadedFiles.map(f => `<li>${f.name}</li>`).join('')}</ul>`;
                 paramsSection.classList.remove('hidden');
+                prognosisTime.textContent = 'berechne...';
+                prognosisSection.classList.remove('hidden');
+
+                try {
+                    // Dauer aller Dateien parallel ermitteln
+                    fileDurations = await Promise.all(uploadedFiles.map(f => getAudioDuration(f)));
+                    const totalDurationSeconds = fileDurations.reduce((sum, d) => sum + d, 0);
+
+                    // Geschätzte Verarbeitungszeit berechnen
+                    const speedFactor = ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR / 60; // Umrechnung in min audio/min real
+                    const estimatedTimeSeconds = speedFactor > 0 ? totalDurationSeconds / speedFactor : Infinity;
+
+                    // UI mit der Prognose aktualisieren
+                    prognosisTime.textContent = formatTime(estimatedTimeSeconds);
+                    prognosisSpeed.textContent = `${ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR} min Audio / Stunde`;
+                } catch (error) {
+                    console.error("Fehler beim Lesen der Audio-Metadaten:", error);
+                    prognosisTime.textContent = 'Fehler bei der Berechnung';
+                    alert(`Ein Fehler ist aufgetreten: ${error}`);
+                }
             } else {
                 fileListDiv.innerHTML = '';
-                paramsSection.classList.add('hidden');
             }
         }
         
-        // --- Audio-Vorverarbeitung ---
+        // --- Audio-Vorverarbeitung (unverändert) ---
         function createMelFilterbank(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
             const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
             const melToHz = (mel) => 700.0 * (Math.exp(mel / 1127.0) - 1.0);
@@ -222,7 +309,7 @@
                         const denominator = rightEdge - center;
                         if (denominator > 0) weight = (rightEdge - specHz) / denominator;
                     }
-                     melWeights.set(weight, j, i);
+                    melWeights.set(weight, j, i);
                 }
             }
             return melWeights.toTensor();
@@ -264,7 +351,7 @@
             });
         }
         
-        // --- Hauptfunktionen ---
+        // --- Hauptfunktionen (decode, merge, unverändert) ---
         async function decodeAndStandardizeAudio(file) {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_CONFIG.SAMPLE_RATE });
             const arrayBuffer = await file.arrayBuffer();
@@ -298,6 +385,7 @@
             return merged;
         }
 
+        // --- GEÄNDERTE Analyse-Funktion mit Zeitmessung ---
         async function runAnalysis() {
             if (uploadedFiles.length === 0) {
                 alert("Bitte wählen Sie zuerst Audiodateien aus.");
@@ -310,6 +398,7 @@
             resultsSection.classList.add('hidden');
             resultsGrid.innerHTML = '';
             resultsSummary.innerHTML = '';
+            timeStats.innerHTML = ''; // Zeit-Anzeige zurücksetzen
 
             try {
                 if (!model) {
@@ -327,6 +416,11 @@
                     }
                 }
 
+                // Initialisierung für Zeitmessung
+                const totalAudioDurationSec = fileDurations.reduce((sum, d) => sum + d, 0);
+                let processedAudioDurationSec = 0;
+                let actualProcessingSpeedMinPerHour = null;
+
                 const threshold = 0.5;
                 const overlapPercent = parseInt(overlapSlider.value);
                 const shouldMerge = mergeCheckbox.checked;
@@ -336,7 +430,11 @@
                 let allEvents = [];
                 for (let i = 0; i < uploadedFiles.length; i++) {
                     const file = uploadedFiles[i];
+                    const fileDuration = fileDurations[i];
+                    const fileProcessingStartTime = Date.now();
+                    
                     progressText.textContent = `Analysiere: ${file.name} (${i+1}/${uploadedFiles.length})`;
+                    
                     try {
                         const y = await decodeAndStandardizeAudio(file);
                         const specs = [];
@@ -368,6 +466,31 @@
                             const fileEvents = shouldMerge ? mergeEvents(candidates) : candidates;
                             allEvents.push(...fileEvents);
                         }
+
+                        // Zeitmessung und Schätzung aktualisieren
+                        const fileProcessingEndTime = Date.now();
+                        const fileProcessingTimeSec = (fileProcessingEndTime - fileProcessingStartTime) / 1000;
+                        processedAudioDurationSec += fileDuration;
+
+                        // Nach der ersten Datei die tatsächliche Geschwindigkeit berechnen
+                        if (i === 0 && fileProcessingTimeSec > 0) {
+                            const speed_audio_sec_per_real_sec = fileDuration / fileProcessingTimeSec;
+                            actualProcessingSpeedMinPerHour = speed_audio_sec_per_real_sec * 60;
+                        }
+
+                        // Wenn eine Geschwindigkeit bekannt ist, die verbleibende Zeit anzeigen
+                        if (actualProcessingSpeedMinPerHour) {
+                            const remainingAudioSec = totalAudioDurationSec - processedAudioDurationSec;
+                            const speed_sec_per_sec = actualProcessingSpeedMinPerHour / 60;
+                            const remainingTimeSec = (speed_sec_per_sec > 0) ? remainingAudioSec / speed_sec_per_sec : Infinity;
+                            
+                            timeStats.innerHTML = `
+                                ${formatRemainingTime(remainingTimeSec)}
+                                <span class="mx-2 text-gray-400">|</span>
+                                Geschwindigkeit: ${actualProcessingSpeedMinPerHour.toFixed(0)} min Audio/Std.
+                            `;
+                        }
+
                     } catch (e) {
                         console.error(`Fehler bei der Verarbeitung von ${file.name}:`, e);
                         alert(`Konnte Datei '${file.name}' nicht verarbeiten: ${e.message}`);
@@ -391,7 +514,7 @@
             }
         }
 
-        // --- Ergebnisdarstellung ---
+        // --- Ergebnisdarstellung (unverändert) ---
         function createWavBlob(samples, sampleRate) {
             const buffer = new ArrayBuffer(44 + samples.length * 2);
             const view = new DataView(buffer);
