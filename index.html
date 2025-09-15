@@ -111,15 +111,15 @@
                         🚀 Analyse starten
                     </button>
                 </div>
-            </div>
 
-            <div id="analysis-progress" class="hidden text-center my-8">
-                 <div class="loader mx-auto"></div>
-                 <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
-                 <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
-                         <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
-                 </div>
-                 <p id="time-stats" class="mt-2 text-sm text-gray-500"></p>
+                <div id="analysis-progress" class="hidden text-center my-8">
+                     <div class="loader mx-auto"></div>
+                     <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
+                     <p id="time-stats" class="mt-2 text-sm text-gray-500"></p>
+                     <div class="w-full bg-gray-200 rounded-full h-2.5 mt-2">
+                             <div id="progress-bar" class="bg-indigo-600 h-2.5 rounded-full" style="width: 0%"></div>
+                     </div>
+                </div>
             </div>
 
             <div id="results-section" class="hidden mt-10">
@@ -133,9 +133,8 @@
 
     <script type="module">
         // --- Globale Konfiguration ---
-        // NEU: Anpassbarer Wert für die anfängliche Geschwindigkeitsschätzung.
-        // Schätzt, wie viele Minuten Audio pro Stunde verarbeitet werden (z.B. 60 = ca. Echtzeit).
-        const ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR = 60; 
+        // GEÄNDERTER WERT: Schätzwert für die Geschwindigkeit wurde angepasst.
+        const ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR = 1788; 
 
         const MODEL_PATH = './uhu_model_js/model.json';
         const MAX_CLIPS_TO_SHOW_PER_CATEGORY = 20;
@@ -167,14 +166,13 @@
         const resultsSummary = document.getElementById('results-summary');
         const resultsGrid = document.getElementById('results-grid');
         
-        // NEU: Zusätzliche UI-Elemente für die Zeitanzeige
         const prognosisSection = document.getElementById('prognosis-section');
         const prognosisTime = document.getElementById('prognosis-time');
         const prognosisSpeed = document.getElementById('prognosis-speed');
         const timeStats = document.getElementById('time-stats');
 
         let uploadedFiles = [];
-        let fileDurations = []; // NEU: Speicher für die Dauer der einzelnen Dateien
+        let fileDurations = [];
         let model = null;
 
         // --- Event Listeners ---
@@ -205,7 +203,7 @@
         });
         startBtn.addEventListener('click', runAnalysis);
 
-        // --- NEUE Hilfsfunktionen für Zeitberechnung und -formatierung ---
+        // --- Hilfsfunktionen für Zeitberechnung und -formatierung ---
         function getAudioDuration(file) {
             return new Promise((resolve, reject) => {
                 const audio = document.createElement('audio');
@@ -249,7 +247,7 @@
             return `Verbleibend: ~${s} Sek.`;
         }
 
-        // --- GEÄNDERTE Funktion zur Dateiverarbeitung mit Prognose ---
+        // --- Funktion zur Dateiverarbeitung mit Prognose ---
         async function handleFiles(files) {
             uploadedFiles = Array.from(files);
             
@@ -263,15 +261,11 @@
                 prognosisSection.classList.remove('hidden');
 
                 try {
-                    // Dauer aller Dateien parallel ermitteln
                     fileDurations = await Promise.all(uploadedFiles.map(f => getAudioDuration(f)));
                     const totalDurationSeconds = fileDurations.reduce((sum, d) => sum + d, 0);
-
-                    // Geschätzte Verarbeitungszeit berechnen
-                    const speedFactor = ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR / 60; // Umrechnung in min audio/min real
+                    const speedFactor = ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR / 60;
                     const estimatedTimeSeconds = speedFactor > 0 ? totalDurationSeconds / speedFactor : Infinity;
 
-                    // UI mit der Prognose aktualisieren
                     prognosisTime.textContent = formatTime(estimatedTimeSeconds);
                     prognosisSpeed.textContent = `${ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR} min Audio / Stunde`;
                 } catch (error) {
@@ -284,7 +278,7 @@
             }
         }
         
-        // --- Audio-Vorverarbeitung (unverändert) ---
+        // --- Audio-Vorverarbeitung ---
         function createMelFilterbank(numMelBins, numSpectrogramBins, sampleRate, lowerEdgeHz, upperEdgeHz) {
             const hzToMel = (hz) => 1127.0 * Math.log(1.0 + hz / 700.0);
             const melToHz = (mel) => 700.0 * (Math.exp(mel / 1127.0) - 1.0);
@@ -351,7 +345,7 @@
             });
         }
         
-        // --- Hauptfunktionen (decode, merge, unverändert) ---
+        // --- Hauptfunktionen ---
         async function decodeAndStandardizeAudio(file) {
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)({ sampleRate: AUDIO_CONFIG.SAMPLE_RATE });
             const arrayBuffer = await file.arrayBuffer();
@@ -385,7 +379,6 @@
             return merged;
         }
 
-        // --- GEÄNDERTE Analyse-Funktion mit Zeitmessung ---
         async function runAnalysis() {
             if (uploadedFiles.length === 0) {
                 alert("Bitte wählen Sie zuerst Audiodateien aus.");
@@ -398,7 +391,7 @@
             resultsSection.classList.add('hidden');
             resultsGrid.innerHTML = '';
             resultsSummary.innerHTML = '';
-            timeStats.innerHTML = ''; // Zeit-Anzeige zurücksetzen
+            timeStats.innerHTML = '';
 
             try {
                 if (!model) {
@@ -416,7 +409,6 @@
                     }
                 }
 
-                // Initialisierung für Zeitmessung
                 const totalAudioDurationSec = fileDurations.reduce((sum, d) => sum + d, 0);
                 let processedAudioDurationSec = 0;
                 let actualProcessingSpeedMinPerHour = null;
@@ -467,18 +459,15 @@
                             allEvents.push(...fileEvents);
                         }
 
-                        // Zeitmessung und Schätzung aktualisieren
                         const fileProcessingEndTime = Date.now();
                         const fileProcessingTimeSec = (fileProcessingEndTime - fileProcessingStartTime) / 1000;
                         processedAudioDurationSec += fileDuration;
 
-                        // Nach der ersten Datei die tatsächliche Geschwindigkeit berechnen
                         if (i === 0 && fileProcessingTimeSec > 0) {
                             const speed_audio_sec_per_real_sec = fileDuration / fileProcessingTimeSec;
                             actualProcessingSpeedMinPerHour = speed_audio_sec_per_real_sec * 60;
                         }
 
-                        // Wenn eine Geschwindigkeit bekannt ist, die verbleibende Zeit anzeigen
                         if (actualProcessingSpeedMinPerHour) {
                             const remainingAudioSec = totalAudioDurationSec - processedAudioDurationSec;
                             const speed_sec_per_sec = actualProcessingSpeedMinPerHour / 60;
@@ -514,7 +503,7 @@
             }
         }
 
-        // --- Ergebnisdarstellung (unverändert) ---
+        // --- Ergebnisdarstellung ---
         function createWavBlob(samples, sampleRate) {
             const buffer = new ArrayBuffer(44 + samples.length * 2);
             const view = new DataView(buffer);
