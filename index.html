@@ -7,19 +7,52 @@
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
+	<script>
+        // 1. Array mit den Bildinformationen
+        const images = [
+            { src: "./Logo_TH_Luebeck_new.svg.png", alt: 'Beschreibung Bild 1' },
+            { src: "./Siegel-Uni-Luebeck.svg.png", alt: 'Beschreibung Bild 2' },
+            { src: "./logo-eulenschutz-266px-d33af36f.png", alt: 'Beschreibung Bild 3' }
+        ];
 
-    <div class="image-container">
-        <img src="./Logo_TH_Luebeck_new.svg.png" alt="Beschreibung Bild 1" class="resizable-image">
-        <img src="./Siegel-Uni-Luebeck.svg.png" alt="Beschreibung Bild 2" class="resizable-image">
-        <img src="./logo-eulenschutz-266px-d33af36f.png" alt="Beschreibung Bild 3" class="resizable-image">
-    </div>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Uhu-Ruf-Detektor</title>
-    <link rel="icon" type="image/png" href="favicon.png">
-    <script src="https://cdn.tailwindcss.com"></script>
-    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-    <style>
+        // 2. Den Container für die Bilder erstellen
+        const imageContainer = document.createElement('div');
+
+        // 3. Dem Container die CSS-Eigenschaften zuweisen
+        // Beachte: CSS-Eigenschaften mit Bindestrich (z.B. justify-content) werden in JavaScript
+        // zu camelCase (z.B. justifyContent).
+        Object.assign(imageContainer.style, {
+            display: 'flex',
+            justifyContent: 'space-around',
+            alignItems: 'center',
+            padding: '20px 0',
+            maxWidth: '80%',
+            margin: '0 auto'
+        });
+
+        // 4. Durch das Array loopen und für jeden Eintrag ein Bild erstellen
+        images.forEach(imageData => {
+            // Ein <img>-Element erstellen
+            const imgElement = document.createElement('img');
+
+            // Attribute setzen
+            imgElement.src = imageData.src;
+            imgElement.alt = imageData.alt;
+
+            // Dem Bild die CSS-Eigenschaften zuweisen
+            Object.assign(imgElement.style, {
+                height: '150px', // <-- Hier kannst du die Höhe anpassen
+                width: 'auto',
+                objectFit: 'contain'
+            });
+
+            // Das fertige Bild dem Container hinzufügen
+            imageContainer.appendChild(imgElement);
+        });
+
+        // 5. Den kompletten Container ganz oben im Body der Webseite einfügen
+        document.body.prepend(imageContainer);
+		
         body {
             font-family: 'Inter', sans-serif;
         }
