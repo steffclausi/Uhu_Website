@@ -174,7 +174,31 @@
         let uploadedFiles = [];
         let fileDurations = [];
         let model = null;
+		
+		// --- FÜGT BILDER-HEADER AM ANFANG HINZU ---
+		(() => {
+			const imageHeaderData = [
+				{ src: './Logo_TH_Luebeck_new.svg.png', alt: 'Logo 1 Beschreibung' },
+				{ src: './Siegel-Uni-Luebeck.svg.png', alt: 'Logo 2 Beschreibung' },
+				{ src: './logo-eulenschutz-266px-d33af36f.png', alt: 'Logo 3 Beschreibung' }
+			];
 
+			const container = document.createElement('div');
+			// Wir nutzen hier direkt die Tailwind-Klassen, da Tailwind ja geladen ist.
+			container.className = 'flex justify-center items-center gap-x-12 mb-8';
+
+			imageHeaderData.forEach(data => {
+				const img = document.createElement('img');
+				img.src = data.src;
+				img.alt = data.alt;
+				// Und auch hier die Tailwind-Klassen für die Größe
+				img.className = 'h-16 w-auto'; // Höhe hier anpassen zum Experimentieren
+				container.appendChild(img);
+			});
+
+			// Fügt den Container am Anfang des Haupt-Containers ein
+			document.querySelector('.container').prepend(container);
+		
         // --- Event Listeners ---
         fileUploader.addEventListener('change', (e) => {
             handleFiles(e.target.files);
