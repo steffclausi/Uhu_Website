@@ -3,6 +3,9 @@ import { audioToMelspectrogram } from './audioProcessor.js';
 import { AUDIO_CONFIG, MAX_CLIPS_TO_SHOW_PER_CATEGORY, ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR } from './config.js';
 
 // --- UI-Elemente ---
+// Zuerst das unsichtbare Datei-Input-Element finden
+const fileUploaderElement = document.getElementById('file-uploader');
+// Davon ausgehend die umschließende Drop-Zone finden (wie im Original)
 const dropZoneElement = fileUploaderElement ? fileUploaderElement.closest('.border-dashed') : null;
 
 export const UIElements = {
@@ -26,6 +29,7 @@ export const UIElements = {
     prognosisSpeed: document.getElementById('prognosis-speed'),
     timeStats: document.getElementById('time-stats'),
 };
+
 
 /**
  * Verarbeitet die vom Benutzer ausgewählten Dateien und zeigt die Prognose an.
@@ -93,7 +97,6 @@ function drawSpectrogram(spec3D, canvas) {
         const colWidth = canvas.width / width;
         const rowHeight = canvas.height / height;
         
-        // Viridis colormap (vereinfacht)
         const viridis = [[68,1,84],[72,40,120],[62,74,137],[49,104,142],[38,130,142],[31,158,137],[53,183,121],[109,205,89],[180,222,44],[253,231,37]];
         const getColor = (value) => {
             const i = Math.min(Math.max(Math.floor(value * (viridis.length - 1)), 0), viridis.length - 2);
@@ -138,7 +141,6 @@ function createResultCard(event) {
     card.appendChild(specCanvas);
     card.appendChild(audio);
 
-    // Spektrogramm zeichnen
     const specTensorForViz = audioToMelspectrogram(event.audioClip);
     drawSpectrogram(specTensorForViz, specCanvas);
     tf.dispose(specTensorForViz);
