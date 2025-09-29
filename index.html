@@ -44,7 +44,6 @@
 
             <div id="parameters-section" class="hidden">
                 <h2 class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">1. Parameter einstellen</h2>
-                
                 <div class="bg-gray-50 p-4 rounded-lg">
                     <details>
                         <summary class="font-medium cursor-pointer text-gray-700">Erweiterte Einstellungen</summary>
@@ -61,20 +60,17 @@
                         </div>
                     </details>
                 </div>
-
                 <div id="prognosis-section" class="hidden mt-6 bg-blue-50 p-4 rounded-lg text-center">
                     <p class="text-sm text-blue-700">
                         Geschätzte Gesamtdauer der Analyse: <strong id="prognosis-time">...</strong><br>
                         <span class="text-xs">(Basierend auf einer angenommenen Geschwindigkeit von <span id="prognosis-speed"></span>)</span>
                     </p>
                 </div>
-                
                 <div class="mt-8 text-center">
                     <button id="start-analysis-btn" class="bg-indigo-600 text-white font-bold py-3 px-8 rounded-lg hover:bg-indigo-700 transition-colors duration-300 text-lg shadow-md">
                         🚀 Analyse starten
                     </button>
                 </div>
-
                 <div id="analysis-progress" class="hidden text-center my-8">
                      <div class="loader mx-auto"></div>
                      <p id="progress-text" class="mt-4 text-lg font-medium text-gray-600">Initialisiere Modell...</p>
@@ -84,16 +80,13 @@
                      </div>
                 </div>
             </div>
-
             <div id="results-section" class="hidden mt-10">
                 <h2 id="results-title" class="text-2xl font-bold text-gray-800 border-b pb-2 mb-6">2. Ergebnisse</h2>
                 <div id="results-summary" class="mb-6"></div>
                 <div id="results-grid" class="mt-6 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-6"></div>
             </div>
-
         </main>
     </div>
-
     <script type="module" src="js/main.js"></script>
 </body>
 </html>
