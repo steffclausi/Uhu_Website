@@ -3,9 +3,11 @@ import { audioToMelspectrogram } from './audioProcessor.js';
 import { AUDIO_CONFIG, MAX_CLIPS_TO_SHOW_PER_CATEGORY, ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR } from './config.js';
 
 // --- UI-Elemente ---
+const dropZoneElement = fileUploaderElement ? fileUploaderElement.closest('.border-dashed') : null;
+
 export const UIElements = {
-    fileUploader: document.getElementById('file-uploader'),
-    dropZone: document.getElementById('drop-zone'),
+    fileUploader: fileUploaderElement,
+    dropZone: dropZoneElement,
     fileListDiv: document.getElementById('file-list'),
     paramsSection: document.getElementById('parameters-section'),
     overlapSlider: document.getElementById('overlap-slider'),
