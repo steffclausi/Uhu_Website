@@ -1,71 +1,4 @@
-import { MODEL_PATH, AUDIO_CONFIG, DETECTION_THRESHOLD } from './config.js';
-import { UIElements, handleFiles, displayResults } from './ui.js';
-import { decodeAndStandardizeAudio, audioToMelspectrogram } from './audioProcessor.js';
-import { formatRemainingTime, mergeEvents } from './utils.js';
-
-// --- Globaler Zustand ---
-let uploadedFiles = [];
-let fileDurations = [];
-let model = null;
-
-// --- Event Listeners ---
-// Sicherstellen, dass die Elemente existieren, bevor Listener angehängt werden
-if (UIElements.fileUploader) {
-    UIElements.fileUploader.addEventListener('change', async (e) => {
-        const fileData = await handleFiles(e.target.files);
-        uploadedFiles = fileData.uploadedFiles;
-        fileDurations = fileData.fileDurations;
-    });
-}
-
-if (UIElements.dropZone) {
-    UIElements.dropZone.addEventListener('dragover', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        UIElements.dropZone.classList.add('border-indigo-500', 'bg-indigo-50');
-    });
-
-    UIElements.dropZone.addEventListener('dragleave', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        UIElements.dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
-    });
-
-    UIElements.dropZone.addEventListener('drop', async (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        UIElements.dropZone.classList.remove('border-indigo-500', 'bg-indigo-50');
-        const fileData = await handleFiles(e.dataTransfer.files);
-        uploadedFiles = fileData.uploadedFiles;
-        fileDurations = fileData.fileDurations;
-    });
-}
-
-UIElements.overlapSlider.addEventListener('input', (e) => {
-    UIElements.overlapValue.textContent = `${e.target.value}%`;
-});
-
-UIElements.startBtn.addEventListener('click', runAnalysis);
-
-
-// --- Hauptfunktionen ---
-async function loadModel() {
-    if (model) return model;
-    
-    UIElements.progressText.textContent = 'Lade Erkennungsmodell...';
-    try {
-        model = await tf.loadLayersModel(MODEL_PATH);
-        const specShape = model.inputs[0].shape.slice(1);
-        const dummyInput = tf.zeros([1, ...specShape]);
-        model.predict(dummyInput).dispose();
-        dummyInput.dispose();
-        return model;
-    } catch (error) {
-        UIElements.progressText.textContent = `Fehler beim Laden des Modells: ${MODEL_PATH} nicht gefunden.`;
-        console.error("Modell-Ladefehler:", error);
-        throw error;
-    }
-}
+import { MODEL_PATH, AUDIO_CONFIG, DETECTION_THRESHOLD, UI_BUFFER_MS } from './config.js';
 
 async function runAnalysis() {
     if (uploadedFiles.length === 0) {
@@ -81,68 +14,101 @@ async function runAnalysis() {
     UIElements.resultsSummary.innerHTML = '';
     UIElements.timeStats.innerHTML = '';
 
-    try {
-        await loadModel();
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        const totalAudioDurationSec = fileDurations.reduce((sum, d) => sum + d, 0);
-        let processedAudioDurationSec = 0;
-        let actualProcessingSpeedMinPerHour = null;
+    try {
+        console.log("Analysis started.");
+        await loadModel();
+        console.log("Model loaded.");
 
         const overlapPercent = parseInt(UIElements.overlapSlider.value);
         const shouldMerge = UIElements.mergeCheckbox.checked;
         const strideSec = AUDIO_CONFIG.DURATION * (1 - overlapPercent / 100.0);
         const strideSamples = Math.round(strideSec * AUDIO_CONFIG.SAMPLE_RATE);
+        const BATCH_SIZE = 24;
 
+        let totalClipsToProcess = 0;
+        for (let i = 0; i < fileDurations.length; i++) {
+            const fileDuration = fileDurations[i];
+            const numClipsInFile = Math.floor((fileDuration - AUDIO_CONFIG.DURATION) / strideSec) + 1;
+            if (numClipsInFile > 0) {
+                totalClipsToProcess += numClipsInFile;
+            }
+        }
+        console.log(`Total clips to process: ${totalClipsToProcess}`);
+        
         let allEvents = [];
+        let processedClips = 0;
+        const analysisStartTime = Date.now();
 
         for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
-            const fileDuration = fileDurations[i];
-            const fileProcessingStartTime = Date.now();
-            
             UIElements.progressText.textContent = `Analysiere: ${file.name} (${i + 1}/${uploadedFiles.length})`;
-            UIElements.progressBar.style.width = `${((i) / uploadedFiles.length) * 100}%`;
-            
+            console.log(`Processing file ${i + 1}/${uploadedFiles.length}: ${file.name}`);
+
             try {
                 const y = await decodeAndStandardizeAudio(file);
-                const specs = [];
-                const starts = [];
+                console.log(`File ${file.name} decoded.`);
+                await sleep(UI_BUFFER_MS); // Pause after decoding
+
+                let specs = [];
+                let startsInSamples = [];
+                let fileCandidates = [];
+
                 for (let start = 0; start + AUDIO_CONFIG.TARGET_SAMPLES <= y.length; start += strideSamples) {
                     specs.push(audioToMelspectrogram(y.slice(start, start + AUDIO_CONFIG.TARGET_SAMPLES)));
-                    starts.push(start);
-                }
+                    startsInSamples.push(start);
 
-                if (specs.length > 0) {
-                    const X = tf.stack(specs);
-                    const probs = await model.predict(X).data();
-                    tf.dispose(X);
-                    tf.dispose(specs);
+                    const isLastClipInFile = start + strideSamples + AUDIO_CONFIG.TARGET_SAMPLES > y.length;
+                    if (specs.length === BATCH_SIZE || (isLastClipInFile && specs.length > 0)) {
+                        const batchSize = specs.length;
+                        console.log(`Processing batch of ${batchSize} clips...`);
 
-                    let candidates = [];
-                    for (let j = 0; j < probs.length; j++) {
-                        if (probs[j] >= DETECTION_THRESHOLD) {
-                            candidates.push({
-                                start: starts[j],
-                                end: starts[j] + AUDIO_CONFIG.TARGET_SAMPLES,
-                                prob: probs[j],
-                                file: file.name,
-                                audioClip: y.slice(starts[j], starts[j] + AUDIO_CONFIG.TARGET_SAMPLES)
-                            });
+                        const X = tf.stack(specs);
+                        const probs = await model.predict(X).data();
+                        tf.dispose(X);
+                        tf.dispose(specs);
+                        specs = [];
+                        console.log("Batch prediction complete.");
+
+                        for (let j = 0; j < probs.length; j++) {
+                            if (probs[j] >= DETECTION_THRESHOLD) {
+                                const clipStart = startsInSamples[j];
+                                const clipEnd = clipStart + AUDIO_CONFIG.TARGET_SAMPLES;
+                                fileCandidates.push({
+                                    start: clipStart,
+                                    end: clipEnd,
+                                    prob: probs[j],
+                                    file: file.name,
+                                    audioClip: y.slice(clipStart, clipEnd)
+                                });
+                            }
                         }
+                        startsInSamples = [];
+
+                        processedClips += batchSize;
+
+                        // UI-Updates nach jedem Batch
+                        const progress = totalClipsToProcess > 0 ? processedClips / totalClipsToProcess : 0;
+                        UIElements.progressBar.style.width = `${progress * 100}%`;
+
+                        const elapsedTimeSec = (Date.now() - analysisStartTime) / 1000;
+                        if (elapsedTimeSec > 1) {
+                            const clipsPerSecond = processedClips / elapsedTimeSec;
+                            const remainingClips = totalClipsToProcess - processedClips;
+                            const remainingTimeSec = clipsPerSecond > 0 ? remainingClips / clipsPerSecond : Infinity;
+                            
+                            const processedAudioDurationSec = processedClips * AUDIO_CONFIG.DURATION;
+                            const speedMinPerHour = elapsedTimeSec > 0 ? (processedAudioDurationSec / 60) / (elapsedTimeSec / 3600) : 0;
+
+                            UIElements.timeStats.innerHTML = `${formatRemainingTime(remainingTimeSec)}<span class="mx-2 text-gray-400">|</span>Geschwindigkeit: ${speedMinPerHour.toFixed(0)} min Audio/Std.`;
+                        }
+
+                        await sleep(UI_BUFFER_MS); // Kurze Pause, um UI-Freezes zu verhindern
                     }
-                    allEvents.push(...(shouldMerge ? mergeEvents(candidates) : candidates));
                 }
-                const fileProcessingTimeSec = (Date.now() - fileProcessingStartTime) / 1000;
-                processedAudioDurationSec += fileDuration;
-                if (i === 0 && fileProcessingTimeSec > 0) {
-                    actualProcessingSpeedMinPerHour = (fileDuration / fileProcessingTimeSec) * 60;
-                }
-                if (actualProcessingSpeedMinPerHour) {
-                    const remainingAudioSec = totalAudioDurationSec - processedAudioDurationSec;
-                    const speedSecPerSec = actualProcessingSpeedMinPerHour / 60;
-                    const remainingTimeSec = speedSecPerSec > 0 ? remainingAudioSec / speedSecPerSec : Infinity;
-                    UIElements.timeStats.innerHTML = `${formatRemainingTime(remainingTimeSec)}<span class="mx-2 text-gray-400">|</span>Geschwindigkeit: ${actualProcessingSpeedMinPerHour.toFixed(0)} min Audio/Std.`;
-                }
+                allEvents.push(...(shouldMerge ? mergeEvents(fileCandidates) : fileCandidates));
+
             } catch (e) {
                 console.error(`Fehler bei der Verarbeitung von ${file.name}:`, e);
                 alert(`Konnte Datei '${file.name}' nicht verarbeiten: ${e.message}`);
@@ -151,6 +117,7 @@ async function runAnalysis() {
         
         UIElements.progressBar.style.width = '100%';
         UIElements.progressText.textContent = 'Analyse abgeschlossen!';
+        console.log("Analysis finished.");
         displayResults(allEvents);
 
     } catch (error) {
@@ -162,6 +129,7 @@ async function runAnalysis() {
         setTimeout(() => {
             UIElements.analysisProgress.classList.add('hidden');
             UIElements.progressBar.style.width = '0%';
+            UIElements.timeStats.innerHTML = '';
         }, 3000);
     }
 }
