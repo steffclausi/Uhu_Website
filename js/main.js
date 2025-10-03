@@ -1,4 +1,4 @@
-import { MODEL_PATH, AUDIO_CONFIG, DETECTION_THRESHOLD, UI_BUFFER_MS } from './config.js';
+import { MODEL_PATH, AUDIO_CONFIG } from './config.js';
 import { UIElements, handleFiles, displayResults } from './ui.js';
 import { decodeAndStandardizeAudio, audioToMelspectrogram } from './audioProcessor.js';
 import { mergeEvents, formatRemainingTime } from './utils.js';
@@ -6,13 +6,14 @@ import { mergeEvents, formatRemainingTime } from './utils.js';
 let model;
 let uploadedFiles = [];
 let fileDurations = [];
+let isStopRequested = false;
 
 async function loadModel() {
     if (model) return;
     console.log("Loading model...");
     UIElements.progressText.textContent = 'Initialisiere und lade KI-Modell...';
     try {
-        model = await tf.loadGraphModel(MODEL_PATH);
+        model = await tf.loadLayersModel(MODEL_PATH);
         console.log("Model loaded successfully.");
         UIElements.progressText.textContent = 'Modell initialisiert.';
     } catch (error) {
@@ -28,14 +29,19 @@ async function runAnalysis() {
         return;
     }
 
+    isStopRequested = false;
     UIElements.startBtn.disabled = true;
-    UIElements.startBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    UIElements.startBtn.classList.add('hidden');
+    UIElements.stopBtn.classList.remove('hidden');
+    UIElements.stopBtn.disabled = false;
+    UIElements.stopBtn.classList.remove('opacity-50', 'cursor-not-allowed');
     UIElements.analysisProgress.classList.remove('hidden');
     UIElements.resultsSection.classList.add('hidden');
     UIElements.resultsGrid.innerHTML = '';
     UIElements.resultsSummary.innerHTML = '';
     UIElements.timeStats.innerHTML = '';
 
+    const uiBufferMs = parseInt(UIElements.bufferSlider.value);
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
     try {
@@ -44,6 +50,7 @@ async function runAnalysis() {
         console.log("Model loaded.");
 
         const overlapPercent = parseInt(UIElements.overlapSlider.value);
+        const detectionThreshold = parseFloat(UIElements.confidenceSlider.value);
         const shouldMerge = UIElements.mergeCheckbox.checked;
         const strideSec = AUDIO_CONFIG.DURATION * (1 - overlapPercent / 100.0);
         const strideSamples = Math.round(strideSec * AUDIO_CONFIG.SAMPLE_RATE);
@@ -63,7 +70,7 @@ async function runAnalysis() {
         let processedClips = 0;
         const analysisStartTime = Date.now();
 
-        for (let i = 0; i < uploadedFiles.length; i++) {
+        analysisLoop: for (let i = 0; i < uploadedFiles.length; i++) {
             const file = uploadedFiles[i];
             UIElements.progressText.textContent = `Analysiere: ${file.name} (${i + 1}/${uploadedFiles.length})`;
             console.log(`Processing file ${i + 1}/${uploadedFiles.length}: ${file.name}`);
@@ -71,13 +78,18 @@ async function runAnalysis() {
             try {
                 const y = await decodeAndStandardizeAudio(file);
                 console.log(`File ${file.name} decoded.`);
-                await sleep(UI_BUFFER_MS); // Pause after decoding
+                await sleep(uiBufferMs);
 
                 let specs = [];
                 let startsInSamples = [];
                 let fileCandidates = [];
 
                 for (let start = 0; start + AUDIO_CONFIG.TARGET_SAMPLES <= y.length; start += strideSamples) {
+                    if (isStopRequested) {
+                        console.log("Stop requested, finishing current batch...");
+                        break analysisLoop;
+                    }
+
                     specs.push(audioToMelspectrogram(y.slice(start, start + AUDIO_CONFIG.TARGET_SAMPLES)));
                     startsInSamples.push(start);
 
@@ -94,7 +106,7 @@ async function runAnalysis() {
                         console.log("Batch prediction complete.");
 
                         for (let j = 0; j < probs.length; j++) {
-                            if (probs[j] >= DETECTION_THRESHOLD) {
+                            if (probs[j] >= detectionThreshold) {
                                 const clipStart = startsInSamples[j];
                                 const clipEnd = clipStart + AUDIO_CONFIG.TARGET_SAMPLES;
                                 fileCandidates.push({
@@ -110,23 +122,22 @@ async function runAnalysis() {
 
                         processedClips += batchSize;
 
-                        // UI-Updates nach jedem Batch
                         const progress = totalClipsToProcess > 0 ? processedClips / totalClipsToProcess : 0;
                         UIElements.progressBar.style.width = `${progress * 100}%`;
 
                         const elapsedTimeSec = (Date.now() - analysisStartTime) / 1000;
                         if (elapsedTimeSec > 1) {
-                            const clipsPerSecond = processedClips / elapsedTimeSec;
                             const remainingClips = totalClipsToProcess - processedClips;
+                            const clipsPerSecond = processedClips / elapsedTimeSec;
                             const remainingTimeSec = clipsPerSecond > 0 ? remainingClips / clipsPerSecond : Infinity;
                             
                             const processedAudioDurationSec = processedClips * AUDIO_CONFIG.DURATION;
-                            const speedMinPerHour = elapsedTimeSec > 0 ? (processedAudioDurationSec / 60) / (elapsedTimeSec / 3600) : 0;
+                            const speedHrPerMin = elapsedTimeSec > 0 ? (processedAudioDurationSec / 3600) / (elapsedTimeSec / 60) : 0;
 
-                            UIElements.timeStats.innerHTML = `${formatRemainingTime(remainingTimeSec)}<span class="mx-2 text-gray-400">|</span>Geschwindigkeit: ${speedMinPerHour.toFixed(0)} min Audio/Std.`;
+                            UIElements.timeStats.innerHTML = `${formatRemainingTime(remainingTimeSec)}<span class="mx-2 text-gray-400">|</span>Geschwindigkeit: ${speedHrPerMin.toFixed(2)} Std. Audio/Min.`;
                         }
 
-                        await sleep(UI_BUFFER_MS); // Kurze Pause, um UI-Freezes zu verhindern
+                        await sleep(uiBufferMs);
                     }
                 }
                 allEvents.push(...(shouldMerge ? mergeEvents(fileCandidates) : fileCandidates));
@@ -137,17 +148,31 @@ async function runAnalysis() {
             }
         }
         
-        UIElements.progressBar.style.width = '100%';
-        UIElements.progressText.textContent = 'Analyse abgeschlossen!';
-        console.log("Analysis finished.");
-        displayResults(allEvents);
+        if (isStopRequested) {
+            UIElements.progressText.textContent = 'Analyse gestoppt.';
+        } else {
+            UIElements.progressBar.style.width = '100%';
+            UIElements.progressText.textContent = 'Analyse abgeschlossen!';
+        }
+        console.log("Analysis finished or stopped.");
+
+        const finalElapsedTimeSec = (Date.now() - analysisStartTime) / 1000;
+        if (finalElapsedTimeSec > 1 && processedClips > 0) { // Use processedClips instead of totalClipsToProcess
+            const finalProcessedAudioDurationSec = processedClips * AUDIO_CONFIG.DURATION;
+            const finalSpeedHrPerMin = (finalProcessedAudioDurationSec / 3600) / (finalElapsedTimeSec / 60);
+            localStorage.setItem('uhuAnalysisSpeedHrPerMin', finalSpeedHrPerMin);
+            console.log(`Saved analysis speed to localStorage: ${finalSpeedHrPerMin}`);
+        }
+
+        displayResults(allEvents, detectionThreshold);
 
     } catch (error) {
         console.error("Ein Fehler ist aufgetreten:", error);
         UIElements.progressText.textContent = `Ein Fehler ist aufgetreten: ${error.message}`;
     } finally {
         UIElements.startBtn.disabled = false;
-        UIElements.startBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+        UIElements.startBtn.classList.remove('hidden', 'opacity-50', 'cursor-not-allowed');
+        UIElements.stopBtn.classList.add('hidden');
         setTimeout(() => {
             UIElements.analysisProgress.classList.add('hidden');
             UIElements.progressBar.style.width = '0%';
@@ -192,10 +217,35 @@ if (UIElements.startBtn) {
     UIElements.startBtn.addEventListener('click', runAnalysis);
 }
 
+if (UIElements.stopBtn) {
+    UIElements.stopBtn.addEventListener('click', () => {
+        isStopRequested = true;
+        UIElements.progressText.textContent = 'Analyse wird nach dem aktuellen Batch gestoppt...';
+        UIElements.stopBtn.disabled = true;
+        UIElements.stopBtn.classList.add('opacity-50', 'cursor-not-allowed');
+    });
+}
+
 if (UIElements.overlapSlider) {
     UIElements.overlapSlider.addEventListener('input', (e) => {
         if (UIElements.overlapValue) {
             UIElements.overlapValue.textContent = `${e.target.value}%`;
+        }
+    });
+}
+
+if (UIElements.confidenceSlider) {
+    UIElements.confidenceSlider.addEventListener('input', (e) => {
+        if (UIElements.confidenceValue) {
+            UIElements.confidenceValue.textContent = `${Math.round(parseFloat(e.target.value) * 100)}%`;
+        }
+    });
+}
+
+if (UIElements.bufferSlider) {
+    UIElements.bufferSlider.addEventListener('input', (e) => {
+        if (UIElements.bufferValue) {
+            UIElements.bufferValue.textContent = `${e.target.value}ms`;
         }
     });
 }

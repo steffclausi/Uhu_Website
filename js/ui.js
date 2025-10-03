@@ -1,6 +1,6 @@
 import { createWavBlob, formatTime } from './utils.js';
 import { audioToMelspectrogram } from './audioProcessor.js';
-import { AUDIO_CONFIG, MAX_CLIPS_TO_SHOW_PER_CATEGORY, ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR } from './config.js';
+import { AUDIO_CONFIG, MAX_CLIPS_TO_SHOW_PER_CATEGORY } from './config.js';
 
 // --- UI-Elemente ---
 const fileUploaderElement = document.getElementById('file-uploader');
@@ -14,6 +14,10 @@ export const UIElements = {
     overlapSlider: document.getElementById('overlap-slider'),
     overlapValue: document.getElementById('overlap-value'),
     mergeCheckbox: document.getElementById('merge-checkbox'),
+    confidenceSlider: document.getElementById('confidence-slider'),
+    confidenceValue: document.getElementById('confidence-value'),
+    bufferSlider: document.getElementById('buffer-slider'),
+    bufferValue: document.getElementById('buffer-value'),
     startBtn: document.getElementById('start-analysis-btn'),
     analysisProgress: document.getElementById('analysis-progress'),
     progressText: document.getElementById('progress-text'),
@@ -26,6 +30,7 @@ export const UIElements = {
     prognosisTime: document.getElementById('prognosis-time'),
     prognosisSpeed: document.getElementById('prognosis-speed'),
     timeStats: document.getElementById('time-stats'),
+    stopBtn: document.getElementById('stop-analysis-btn'),
 };
 
 export async function handleFiles(files) {
@@ -37,8 +42,8 @@ export async function handleFiles(files) {
     if (uploadedFiles.length > 0) {
         UIElements.fileListDiv.innerHTML = `<h3 class="font-medium text-gray-700">Ausgewählte Dateien:</h3><ul class="list-disc list-inside text-sm text-gray-600">${uploadedFiles.map(f => `<li>${f.name}</li>`).join('')}</ul>`;
         UIElements.paramsSection.classList.remove('hidden');
-        UIElements.prognosisTime.textContent = 'berechne...';
-        UIElements.prognosisSection.classList.remove('hidden');
+        
+        const savedSpeed = localStorage.getItem('uhuAnalysisSpeedHrPerMin');
 
         try {
             const getAudioDuration = (file) => new Promise((resolve, reject) => {
@@ -49,16 +54,20 @@ export async function handleFiles(files) {
                 audio.src = URL.createObjectURL(file);
             });
             const fileDurations = await Promise.all(uploadedFiles.map(getAudioDuration));
-            const totalDurationSeconds = fileDurations.reduce((sum, d) => sum + d, 0);
-            const speedFactor = ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR / 60;
-            const estimatedTimeSeconds = speedFactor > 0 ? totalDurationSeconds / speedFactor : Infinity;
 
-            UIElements.prognosisTime.textContent = formatTime(estimatedTimeSeconds);
-            UIElements.prognosisSpeed.textContent = `${ESTIMATED_PROCESSING_RATE_MIN_PER_HOUR} min Audio / Stunde`;
+            if (savedSpeed) {
+                const totalDurationSeconds = fileDurations.reduce((sum, d) => sum + d, 0);
+                const speedHrPerMin = parseFloat(savedSpeed);
+                const estimatedTimeSeconds = speedHrPerMin > 0 ? totalDurationSeconds / (speedHrPerMin * 60) : Infinity;
+                
+                UIElements.prognosisTime.textContent = formatTime(estimatedTimeSeconds);
+                UIElements.prognosisSpeed.textContent = `${speedHrPerMin.toFixed(2)} Std. Audio / Min. (letzter Lauf)`;
+                UIElements.prognosisSection.classList.remove('hidden');
+            }
+
             return { uploadedFiles, fileDurations };
         } catch (error) {
             console.error("Fehler beim Lesen der Audio-Metadaten:", error);
-            UIElements.prognosisTime.textContent = 'Fehler bei der Berechnung';
             alert(`Ein Fehler ist aufgetreten: ${error}`);
             return { uploadedFiles: [], fileDurations: [] };
         }
@@ -119,27 +128,30 @@ function createResultCard(event) {
     return card;
 }
 
-export function displayResults(events) {
+export function displayResults(events, detectionThreshold) {
     UIElements.resultsSection.classList.remove('hidden');
     UIElements.resultsGrid.innerHTML = '';
     UIElements.resultsSummary.innerHTML = '';
     UIElements.resultsTitle.textContent = `2. Ergebnisse: ${events.length} mögliche Uhu-Rufe gefunden`;
     if (events.length === 0) {
-        UIElements.resultsSummary.innerHTML = `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-md" role="alert"><p>Es wurden keine Ereignisse über dem Schwellenwert von 50% gefunden.</p></div>`;
+        const thresholdPercent = Math.round((detectionThreshold || 0.5) * 100);
+        UIElements.resultsSummary.innerHTML = `<div class="bg-blue-100 border-l-4 border-blue-500 text-blue-700 p-4 rounded-md" role="alert"><p>Es wurden keine Ereignisse über dem Schwellenwert von ${thresholdPercent}% gefunden.</p></div>`;
         return;
     }
-    const highConfidenceEvents = events.filter(e => e.prob >= 0.98).sort((a, b) => b.prob - a.prob);
-    const mediumConfidenceEvents = events.filter(e => e.prob >= 0.5 && e.prob < 0.98).sort((a, b) => b.prob - a.prob);
+    
+    // Sort all events by probability
+    const sortedEvents = events.sort((a, b) => b.prob - a.prob);
+
     const appendClips = (eventList, titleText, titleColor) => {
         if (eventList.length > 0) {
             const title = document.createElement('h3');
             title.className = `col-span-full text-xl font-bold text-gray-800 mt-6 mb-2 ${titleColor}`;
             const clipsToShow = eventList.slice(0, MAX_CLIPS_TO_SHOW_PER_CATEGORY);
-            title.textContent = `${titleText} (Top ${clipsToShow.length})`;
+            title.textContent = `${titleText} (${clipsToShow.length} von ${eventList.length} gezeigt)`;
             UIElements.resultsGrid.appendChild(title);
             clipsToShow.forEach(event => UIElements.resultsGrid.appendChild(createResultCard(event)));
         }
     };
-    appendClips(highConfidenceEvents, '✅ Uhu erkannt mit hoher Wahrscheinlichkeit', 'text-green-700');
-    appendClips(mediumConfidenceEvents, '🤔 Potentiell Uhu erkannt, bitte prüfen', 'text-yellow-700');
+
+    appendClips(sortedEvents, 'Alle erkannten Ereignisse (sortiert nach Konfidenz)', 'text-gray-800');
 }
