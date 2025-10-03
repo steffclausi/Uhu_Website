@@ -1,4 +1,26 @@
 import { MODEL_PATH, AUDIO_CONFIG, DETECTION_THRESHOLD, UI_BUFFER_MS } from './config.js';
+import { UIElements, handleFiles, displayResults } from './ui.js';
+import { decodeAndStandardizeAudio, audioToMelspectrogram } from './audioProcessor.js';
+import { mergeEvents, formatRemainingTime } from './utils.js';
+
+let model;
+let uploadedFiles = [];
+let fileDurations = [];
+
+async function loadModel() {
+    if (model) return;
+    console.log("Loading model...");
+    UIElements.progressText.textContent = 'Initialisiere und lade KI-Modell...';
+    try {
+        model = await tf.loadGraphModel(MODEL_PATH);
+        console.log("Model loaded successfully.");
+        UIElements.progressText.textContent = 'Modell initialisiert.';
+    } catch (error) {
+        console.error("Error loading model:", error);
+        UIElements.progressText.textContent = `Fehler beim Laden des Modells: ${error.message}`;
+        throw error;
+    }
+}
 
 async function runAnalysis() {
     if (uploadedFiles.length === 0) {
@@ -111,7 +133,7 @@ async function runAnalysis() {
 
             } catch (e) {
                 console.error(`Fehler bei der Verarbeitung von ${file.name}:`, e);
-                alert(`Konnte Datei '${file.name}' nicht verarbeiten: ${e.message}`);
+                alert(`Konnte Datei '''${file.name}''' nicht verarbeiten: ${e.message}`);
             }
         }
         
@@ -132,4 +154,48 @@ async function runAnalysis() {
             UIElements.timeStats.innerHTML = '';
         }, 3000);
     }
+}
+
+// --- Event Listeners ---
+if (UIElements.fileUploader) {
+    UIElements.fileUploader.addEventListener('change', async (e) => {
+        const fileData = await handleFiles(e.target.files);
+        uploadedFiles = fileData.uploadedFiles;
+        fileDurations = fileData.fileDurations;
+    });
+}
+
+if (UIElements.dropZone) {
+    UIElements.dropZone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        UIElements.dropZone.classList.add('border-indigo-600');
+    });
+
+    UIElements.dropZone.addEventListener('dragleave', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        UIElements.dropZone.classList.remove('border-indigo-600');
+    });
+
+    UIElements.dropZone.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        UIElements.dropZone.classList.remove('border-indigo-600');
+        const fileData = await handleFiles(e.dataTransfer.files);
+        uploadedFiles = fileData.uploadedFiles;
+        fileDurations = fileData.fileDurations;
+    });
+}
+
+if (UIElements.startBtn) {
+    UIElements.startBtn.addEventListener('click', runAnalysis);
+}
+
+if (UIElements.overlapSlider) {
+    UIElements.overlapSlider.addEventListener('input', (e) => {
+        if (UIElements.overlapValue) {
+            UIElements.overlapValue.textContent = `${e.target.value}%`;
+        }
+    });
 }
